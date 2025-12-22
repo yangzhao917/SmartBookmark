@@ -2,13 +2,15 @@ class LocalStorageMgr {
     static Namespace = {
         BOOKMARK: 'bookmark.',
         TAGCACHE: 'tagcache',
-        BOOKMARK_CACHE: 'bookmark_cache'
+        BOOKMARK_CACHE: 'bookmark_cache',
+        CACHE: 'cache.'
     };
 
     static _bookmarksCache = null;
     static _debounceTimer = null;
     static _bookmarksLocalCache = null;
     static _bookmarkCacheUpdateTimer = null;
+    static _commonCache = {};
     static DEBOUNCE_DELAY = 2000; // 2000毫秒的防抖延迟
     static BOOKMARK_CACHE_UPDATE_DELAY = 4000; // 4000毫秒的更新间隔
 
@@ -62,7 +64,8 @@ class LocalStorageMgr {
         });
     }
 
-    // 基础存储操作
+    // ----------------------------------- 基础存储操作开始 分割线 -----------------------------------
+
     static async get(key) {
         const result = await chrome.storage.local.get(key);
         return result[key];
@@ -116,7 +119,10 @@ class LocalStorageMgr {
         }
     }
 
-    // 书签相关操作
+    // ----------------------------------- 基础存储操作结束 分割线 -----------------------------------
+
+    // ----------------------------------- 书签相关操作开始 分割线 -----------------------------------
+
     static getBookmarkKey(url) {
         return `${this.Namespace.BOOKMARK}${url}`;
     }
@@ -242,6 +248,10 @@ class LocalStorageMgr {
         this.triggerBookmarkCacheUpdate();
     }
 
+    // ----------------------------------- 书签部分结束 分割线 -----------------------------------
+
+    // ----------------------------------- 书签缓存部分开始 分割线 -----------------------------------
+
     static async getBookmarksFromLocalCache() {
         logger.debug('开始获取本地书签缓存');
         if (this._bookmarksLocalCache) {
@@ -304,6 +314,8 @@ class LocalStorageMgr {
         }
     }
 
+    // ----------------------------------- 书签缓存部分结束 分割线 -----------------------------------
+
     // 标签缓存
     static async getTags(url) {
         try {
@@ -332,4 +344,22 @@ class LocalStorageMgr {
     static async setLastShownVersion(version) {
         await this.set('last_shown_version', version);
     }
+
+    // 自定义分组折叠状态
+    static async getCustomGroupCollapsedStates() {
+        const key = this.Namespace.CACHE + 'group_collapsed_states';
+        if (this._commonCache[key]) {
+            return this._commonCache[key];
+        }
+        const states = await this.get(key);
+        this._commonCache[key] = states;
+        return states || {};
+    }
+
+    static async setCustomGroupCollapsedStates(states) {
+        const key = this.Namespace.CACHE + 'group_collapsed_states';
+        await this.set(key, states);
+        this._commonCache[key] = states;
+    }
+    // 自定义分组折叠状态结束
 }

@@ -254,8 +254,8 @@ class QuickSaveManager {
                 this.isEditMode = true;
                 this.editingBookmark = bookmark;
                 this.elements.pageTitle.textContent = bookmark.title;
-                this.elements.pageUrl.contentEditable = "false";
-                this.elements.pageUrl.classList.remove("editable");
+                this.elements.pageUrl.contentEditable = "true";
+                this.elements.pageUrl.classList.add("editable");
                 this.elements.deleteBookmarkBtn.style.display = 'flex';
             }
         } else {
@@ -275,24 +275,29 @@ class QuickSaveManager {
             }
         });
 
-        if (!this.isEditMode) {
-            pageUrl.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    pageUrl.blur();
-                }
-            });
+        pageUrl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                pageUrl.blur();
+            }
+        });
 
-            pageUrl.addEventListener('blur', () => {
-                this.validateUrl();
-            });
-        }
+        pageUrl.addEventListener('blur', () => {
+            this.validateUrl();
+        });
 
         // 标签列表点击事件（删除标签）
         tagsList.addEventListener('click', (e) => {
             if (e.target.classList.contains('remove-tag-btn')) {
                 const tagElement = e.target.parentElement;
                 tagElement.remove();
+            }  else if (e.target.classList.contains('tag-text')) {
+                // 点击标签本身，将标签内容设置到输入框中
+                const tagText = e.target.textContent.trim();
+                if (newTagInput && tagText) {
+                    newTagInput.value = tagText;
+                    newTagInput.focus();
+                }
             }
         });
 
@@ -342,7 +347,7 @@ class QuickSaveManager {
             const tagElement = document.createElement('span');
             tagElement.className = 'tag';
             tagElement.innerHTML = `
-                ${tag}
+                <span class="tag-text">${tag}</span>
                 <button class="remove-tag-btn">×</button>
             `;
             tagsList.appendChild(tagElement);
@@ -363,8 +368,8 @@ class QuickSaveManager {
     }
 
     getCurrentTags() {
-        const tagElements = this.elements.tagsList.querySelectorAll('.tag');
-        return Array.from(tagElements).map(el => el.textContent.replace('×', '').trim());
+        const tagElements = this.elements.tagsList.querySelectorAll('.tag-text');
+        return Array.from(tagElements).map(el => el.textContent.trim());
     }
 
     addNewTag(tag) {
@@ -374,6 +379,8 @@ class QuickSaveManager {
         if (!currentTags.includes(tag)) {
             this.renderTags([...currentTags, tag]);
             this.elements.newTagInput.value = '';
+        } else {
+            this.showStatus('标签已存在', 'error');
         }
     }
 
@@ -443,7 +450,7 @@ class QuickSaveManager {
             this.showStatus(i18n.M('msg_status_saving_bookmark'), 'success');
             
             const title = pageTitle.textContent.trim();
-            const url = this.isEditMode ? this.currentTab.url : this.getEditedUrl();
+            const url = this.getEditedUrl();
             const excerpt = this.getEditedExcerpt();
 
             // 验证URL
@@ -454,10 +461,18 @@ class QuickSaveManager {
             }
 
             // 生成嵌入向量
-            let embedding = null;
-            if (!this.isEditMode) {
+            let embedding = this.isEditMode ? this.editingBookmark.embedding : null;
+            let needRegenerate = false;
+            if (this.isEditMode) {
+                needRegenerate = title !== this.editingBookmark.title || excerpt !== this.editingBookmark.excerpt || JSON.stringify(tags) !== JSON.stringify(this.editingBookmark.tags);
+            }
+            if (!this.isEditMode || needRegenerate) {
                 this.showStatus(i18n.M('msg_status_generating_embedding'), 'success');
-                embedding = await getEmbedding(makeEmbeddingText(this.pageContent, this.currentTab, tags));
+                const pageContent = {
+                    title: title,
+                    excerpt: excerpt,
+                }
+                embedding = await getEmbedding(makeEmbeddingText(pageContent, this.currentTab, tags));
             }
 
             // 获取当前服务信息
@@ -468,10 +483,10 @@ class QuickSaveManager {
                 title: title,
                 tags: tags,
                 excerpt: excerpt,
-                embedding: this.isEditMode ? this.editingBookmark.embedding : embedding,
-                savedAt: this.isEditMode ? this.editingBookmark.savedAt : new Date().toISOString(),
+                embedding: embedding,
+                savedAt: this.isEditMode ? this.editingBookmark.savedAt : Date.now(),
                 useCount: this.isEditMode ? this.editingBookmark.useCount : 1,
-                lastUsed: new Date().toISOString(),
+                lastUsed: Date.now(),
                 apiService: this.isEditMode ? this.editingBookmark.apiService : apiService.id,
                 embedModel: this.isEditMode ? this.editingBookmark.embedModel : apiService.embedModel,
             };
@@ -484,6 +499,12 @@ class QuickSaveManager {
             });
 
             this.showStatus(i18n.M('msg_status_saving_bookmark'), 'success');
+            
+            // 如果编辑模式下URL发生变化，则先删除旧书签
+            if (this.isEditMode && this.editingBookmark.url !== url) {
+                await LocalStorageMgr.removeBookmark(this.editingBookmark.url);
+                await recordBookmarkChange(this.editingBookmark, true, false);
+            }
             
             // 保存新书签
             await LocalStorageMgr.setBookmark(url, pageInfo);

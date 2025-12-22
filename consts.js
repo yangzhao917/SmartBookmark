@@ -44,3 +44,9 @@ const SyncStatus = {
 }
 
 const MAX_PINNED_SITES = 10;
+
+// 特性开关 - 用于暂时禁用某些功能
+const FEATURE_FLAGS = {
+    ENABLE_LOGIN: false,        // 暂时禁用登录功能
+    ENABLE_CLOUD_SYNC: false,    // 暂时禁用云同步功能
+};

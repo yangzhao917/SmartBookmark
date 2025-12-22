@@ -31,11 +31,11 @@ Smart Bookmark 是一款基于 AI 的智能书签管理插件，专注于解决�
 - [x] 增加webdav同步功能
 - [x] 增加书签批量选择和删除功能
 - [x] 支持AI生成书签摘要
+- [x] 上架Edge浏览器商店
 - [ ] 支持智能推荐标签
 - [ ] 支持自定义提示词
 - [ ] 支持多级标签和AI自动分类
 - [ ] 增加多语言支持
-- [x] 上架Edge浏览器商店
 
 ### FAQ
 #### 如何接入Ollama本地模型？
@@ -55,6 +55,11 @@ Smart Bookmark 是一款基于 AI 的智能书签管理插件，专注于解决�
 
 ### **反馈交流群** 
 <img width="256" src="pic/wechat.jpg?v=20250228" />
+
+### **资助开发**
+如果 Smart Bookmark 对您有帮助，欢迎通过以下方式支持项目持续发展：  
+[💝 点击前往资助页面](https://howoii.github.io/smartbookmark-support/donate.html)  
+您的支持将帮助我们持续改进和完善插件功能，感谢您的慷慨支持！
 
 ### **感谢**  
 本项目使用Cursor开发，感谢 [Cursor](https://www.cursor.com/) 提供的强大AI能力！

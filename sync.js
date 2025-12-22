@@ -21,6 +21,9 @@ class SyncManager {
 
     // 初始化同步
     async startSync() {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return;
+        }
         // 如果是第一次同步(版本号为0),则需要同步所有本地书签
         const lastSyncVersion = await this.getSyncVersion();
         if (lastSyncVersion === 0) {
@@ -32,6 +35,9 @@ class SyncManager {
 
     // 记录书签变更
     async recordBookmarkChange(bookmarks, isDeleted = false) {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return;
+        }
         // 支持单个书签或书签数组
         const bookmarkArray = Array.isArray(bookmarks) ? bookmarks : [bookmarks];
         const lastSyncVersion = await this.getSyncVersion();
@@ -50,6 +56,9 @@ class SyncManager {
 
     // 检查是否可以同步
     async canSync() {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return false;
+        }
         const online = navigator.onLine;
         if (!online) {
             return false;
@@ -371,7 +380,7 @@ class SyncManager {
                 tags: localBookmark.tags || [],
                 excerpt: localBookmark.excerpt || '',
                 embedding: localBookmark.embedding,
-                savedAt: localBookmark.savedAt ? (typeof localBookmark.savedAt === 'number' ? localBookmark.savedAt : new Date(localBookmark.savedAt).getTime()) : 0,
+                savedAt: localBookmark.savedAt ? getDateTimestamp(localBookmark.savedAt) || 0 : 0,
                 apiService: localBookmark.apiService,
                 embedModel: localBookmark.embedModel
             },
@@ -388,10 +397,10 @@ class SyncManager {
             tags: serverBookmark.content.tags || [],
             excerpt: serverBookmark.content.excerpt || '',
             embedding: serverBookmark.content.embedding,
-            savedAt: serverBookmark.content.savedAt ? new Date(serverBookmark.content.savedAt).toISOString() : new Date().toISOString(),
+            savedAt: serverBookmark.content.savedAt ? getDateTimestamp(serverBookmark.content.savedAt) : Date.now(),
             apiService: serverBookmark.content.apiService,
             embedModel: serverBookmark.content.embedModel,
-            lastUsed: localBookmark?.lastUsed ? localBookmark.lastUsed : null,
+            lastUsed: localBookmark?.lastUsed ? getDateTimestamp(localBookmark.lastUsed) : null,
             useCount: localBookmark?.useCount || 0
         };
     }

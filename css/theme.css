@@ -6,6 +6,8 @@
     --secondary-color-rgb: 108, 117, 125;
     --danger-color-rgb: 211, 47, 47;
     --danger-hover-rgb: 198, 40, 40;
+    --donate-color-rgb: 231, 76, 60;
+    --donate-hover-rgb: 192, 57, 43;
     --bg-primary-rgb: 255, 255, 255;
     
     /* 基础色彩 */
@@ -23,6 +25,9 @@
     --action-disabled: #cccccc;
     --info-color: #1976d2;
     --info-hover: #1557b0;
+    --donate-color: #e74c3c;
+    --donate-hover: #c0392b;
+    --donate-hover-bg: rgba(231, 76, 60, 0.1);
     --relevance-high: #1b5e20;
     --relevance-medium: #ffc107;
     --relevance-low: #E0E0E0;
@@ -103,6 +108,8 @@
     --secondary-color-rgb: 158, 158, 158;
     --danger-color-rgb: 239, 83, 80;
     --danger-hover-rgb: 229, 115, 115;
+    --donate-color-rgb: 239, 83, 80;
+    --donate-hover-rgb: 229, 115, 115;
     --bg-primary-rgb: 54, 54, 54;
     
     /* 基础色彩 */
@@ -120,6 +127,9 @@
     --action-disabled: #424242;
     --info-color: #42a5f5;
     --info-hover: #2196f3;
+    --donate-color: #ef5350;
+    --donate-hover: #e57373;
+    --donate-hover-bg: rgba(239, 83, 80, 0.15);
     --relevance-high: #00b70e;
     --relevance-medium: #e9b519;
     --relevance-low: #c0c0c0;
@@ -201,6 +211,8 @@
         --secondary-color-rgb: 158, 158, 158;
         --danger-color-rgb: 239, 83, 80;
         --danger-hover-rgb: 229, 115, 115;
+        --donate-color-rgb: 239, 83, 80;
+        --donate-hover-rgb: 229, 115, 115;
         --bg-primary-rgb: 54, 54, 54;
         
         /* 基础色彩 */
@@ -218,6 +230,9 @@
         --action-disabled: #424242;
         --info-color: #42a5f5;
         --info-hover: #2196f3;
+        --donate-color: #ef5350;
+        --donate-hover: #e57373;
+        --donate-hover-bg: rgba(239, 83, 80, 0.15);
         --relevance-high: #00b70e;
         --relevance-medium: #e9b519;
         --relevance-low: #c0c0c0;

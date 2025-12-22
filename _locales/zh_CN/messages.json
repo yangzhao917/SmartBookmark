@@ -70,7 +70,7 @@
         "message": "页面正在加载中，请等待加载完成后再试"
     },
     "msg_status_page_unsupported": {
-        "message": "基于隐私安全保护，不支持保存此页面"
+        "message": "基于浏览器安全策略，不支持保存此页面"
     },
     "msg_status_saving_bookmark": {
         "message": "正在保存书签..."

@@ -77,8 +77,9 @@ async function openOptionsPage(section = 'overview') {
         await chrome.runtime.openOptionsPage();
     } else {
         // 如果没有找到settings页面，创建新页面
+        const url = chrome.runtime.getURL('settings.html#' + section);
         await chrome.tabs.create({
-            url: chrome.runtime.getURL('settings.html#' + section)
+            url: url
         });
     }
 }
@@ -95,7 +96,7 @@ async function updateBookmarkUsage(url) {
                 bookmark.useCount,
                 bookmark.lastUsed
             ) + 1;
-            bookmark.lastUsed = new Date().toISOString();
+            bookmark.lastUsed = Date.now();
 
             await LocalStorageMgr.setBookmark(url, bookmark);
             return bookmark;
@@ -117,7 +118,7 @@ async function batchUpdateBookmarksUsage(urls) {
                 bookmark.useCount,
                 bookmark.lastUsed
             ) + 1;
-            bookmark.lastUsed = new Date().toISOString();
+            bookmark.lastUsed = Date.now();
         }
         await LocalStorageMgr.setBookmarks(bookmarks);
     } catch (error) {

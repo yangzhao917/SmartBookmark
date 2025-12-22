@@ -79,6 +79,10 @@ body {
     background: var(--bg-primary);
     border-color: var(--primary-color);
     box-shadow: 0 0 0 2px rgba(var(--primary-color-rgb), 0.1);
+    font-size: 13px;  /* 编辑时减小字体大小 */
+    font-weight: 400;  /* 编辑时减小字体粗细 */
+    max-height: 120px;  /* 限制最大高度 */
+    overflow-y: auto;  /* 超出时显示滚动条 */
 }
 
 /* 添加编辑图标 */
@@ -248,6 +252,7 @@ body {
 }
 
 .tags-list .tag {
+    cursor: pointer;
     border: 1px solid var(--success-border);
 }
 
@@ -266,7 +271,7 @@ body {
 
 .remove-tag-btn:hover {
     color: var(--danger-color);
-    transform: scale(1.1);
+    transform: scale(1.2);
 }
 
 .remove-tag-btn:active {

@@ -269,7 +269,7 @@ class SyncStatusDialog {
             const enabledServices = [];
 
             // 检查云同步是否开启
-            if (config.cloud && config.cloud.autoSync) {
+            if (FEATURE_FLAGS.ENABLE_CLOUD_SYNC && config.cloud && config.cloud.autoSync) {
                 const {valid} = await validateToken();
                 if (valid) {
                     enabledServices.push({
@@ -479,6 +479,9 @@ class SyncStatusDialog {
      * @returns {Promise<Object>} 同步结果
      */
     async executeCloudSync() {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            throw new Error('云同步功能已禁用');
+        }
         try {
             return new Promise((resolve, reject) => {
                 chrome.runtime.sendMessage({
@@ -636,6 +639,28 @@ class BookmarkManager {
         await handlePrivacyIconClick(this.elements.required.privacyIcon.dataset.isPrivate === 'true');
     }
 
+    async hasSyncError() {
+        const config = await SyncSettingsManager.getConfig();
+        const status = await SyncStatusManager.getStatus();
+        
+        // 检查云同步是否开启
+        if (FEATURE_FLAGS.ENABLE_CLOUD_SYNC && config.cloud && config.cloud.autoSync) {
+            const {valid} = await validateToken();
+            if (valid && status.cloud && status.cloud.lastSyncResult && status.cloud.lastSyncResult !== 'success') {
+                return true;
+            }
+        }
+        
+        // 检查WebDAV同步是否开启
+        if (config.webdav && config.webdav.syncStrategy.autoSync) {
+            const valid = SyncSettingsManager.validateWebDAVConfig(config.webdav)
+            if (valid && status.webdav && status.webdav.lastSyncResult && status.webdav.lastSyncResult !== 'success') {
+                return true;
+            }
+        }
+        return false;
+    }
+
     async updateSyncButtonState() {
         try {
             const syncButton = this.elements.required.syncButton;
@@ -647,7 +672,7 @@ class BookmarkManager {
             if (isSyncing) {
                 state = 'syncing';
             } else {
-                const hasSyncError = await SyncStatusManager.hasSyncError();
+                const hasSyncError = await this.hasSyncError();
                 if (hasSyncError) {
                     state = 'error';
                 }
@@ -730,6 +755,8 @@ class BookmarkManager {
                         if (!currentTags.includes(newTag)) {
                             this.renderTags([...currentTags, newTag]);
                             newTagInput.value = '';
+                        } else {
+                            updateStatus('标签已存在', true);
                         }
                     }
                 }
@@ -739,8 +766,16 @@ class BookmarkManager {
         if (tagsList) {
             tagsList.addEventListener('click', (e) => {
                 if (e.target.classList.contains('remove-tag-btn')) {
+                    // 点击删除按钮，删除标签
                     const tagElement = e.target.parentElement;
                     tagElement.remove();
+                } else if (e.target.classList.contains('tag-text')) {
+                    // 点击标签本身，将标签内容设置到输入框中
+                    const tagText = e.target.textContent.trim();
+                    if (newTagInput && tagText) {
+                        newTagInput.value = tagText;
+                        newTagInput.focus();
+                    }
                 }
             });
         }
@@ -749,10 +784,10 @@ class BookmarkManager {
             saveTagsBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                dialog.classList.remove('show');
                 const finalTags = this.getCurrentTags();
                 const title = this.getEditedTitle();
                 await this.saveBookmark(finalTags, title);
+                dialog.classList.remove('show');
             });
         }
 
@@ -1105,7 +1140,7 @@ class BookmarkManager {
                     this.checkEmbeddingStatus();
                 }
             } else if (areaName === 'local') {
-                if (changes[SyncStatusManager.SYNC_PROCESS_KEY]) {
+                if (changes[SyncStatusManager.SYNC_PROCESS_KEY] || changes[SyncSettingsManager.SYNC_CONFIG_KEY]) {
                     this.updateSyncButtonState();
                     this.syncStatusDialog.onSyncProcessChange();
                 }
@@ -1117,8 +1152,8 @@ class BookmarkManager {
         const { tagsList } = this.elements.required;
         if (!tagsList) return [];
         
-        const tagElements = tagsList.querySelectorAll('.tag');
-        return Array.from(tagElements).map(el => el.textContent.replace('×', '').trim());
+        const tagElements = tagsList.querySelectorAll('.tag-text');
+        return Array.from(tagElements).map(el => el.textContent.trim());
     }
 
     // 验证URL格式
@@ -1177,13 +1212,13 @@ class BookmarkManager {
 
                 // 添加对非http页面的检查
                 if (isNonMarkableUrl(tab.url)) {
-                    updateStatus('基于隐私安全保护，不支持保存此页面', false);
+                    updateStatus('基于浏览器安全策略，不支持保存此页面', false);
                     return;
                 }
 
                 await this.processAndShowTags(tab);
             } else {
-                updateStatus('基于隐私安全保护，不支持保存此页面', false);
+                updateStatus('基于浏览器安全策略，不支持保存此页面', false);
             }
         } catch (error) {
             logger.error('保存过程中出错:', error);
@@ -1255,6 +1290,7 @@ class BookmarkManager {
         
         // 设置页面内容
         this.pageContent = {
+            title: bookmark.title,
             excerpt: bookmark.excerpt,
             metadata: {}
         };
@@ -1297,15 +1333,10 @@ class BookmarkManager {
         dialogUrl.textContent = this.currentTab.url;
         dialogUrl.title = this.currentTab.url;
         
-        // 设置URL是否可编辑 - 只有在非编辑模式下才可编辑
-        if (!this.isEditMode) {
-            dialogUrl.contentEditable = "true";
-            dialogUrl.classList.add("editable");
-        } else {
-            dialogUrl.contentEditable = "false";
-            dialogUrl.classList.remove("editable");
-        }
-
+        // 设置URL是否可编辑 
+        dialogUrl.contentEditable = "true";
+        dialogUrl.classList.add("editable");
+        
         // 设置图标
         dialogFavicon.src = await getFaviconUrl(this.currentTab.url);
         dialogFavicon.onerror = () => {
@@ -1378,7 +1409,7 @@ class BookmarkManager {
             const tagElement = document.createElement('span');
             tagElement.className = 'tag';
             tagElement.innerHTML = `
-                ${tag}
+                <span class="tag-text">${tag}</span>
                 <button class="remove-tag-btn">×</button>
             `;
             tagsList.appendChild(tagElement);
@@ -1398,11 +1429,20 @@ class BookmarkManager {
             StatusManager.startOperation(this.isEditMode ? '正在更新书签' : '正在保存书签');
             
             // 获取编辑后的 URL 和摘要
-            const url = this.isEditMode ? this.currentTab.url : this.getEditedUrl();
+            const url = this.getEditedUrl();
             const editedExcerpt = this.getEditedExcerpt();
+            let needRegenerate = false;
+            if (this.isEditMode) {
+                needRegenerate = title !== this.editingBookmark.title || editedExcerpt !== this.editingBookmark.excerpt || JSON.stringify(tags) !== JSON.stringify(this.editingBookmark.tags);
+            } else {
+                needRegenerate = true;
+            }
             
-            // 如果是编辑现有书签,保留原有的 embedding 和其他信息
-            const embedding = this.isEditMode ? this.editingBookmark.embedding : await getEmbedding(makeEmbeddingText(this.pageContent, this.currentTab, tags));
+            const pageContent = {
+                title: title,
+                excerpt: editedExcerpt
+            }
+            const embedding = needRegenerate ? await getEmbedding(makeEmbeddingText(pageContent, this.currentTab, tags)) : this.editingBookmark.embedding;
             const apiService = await ConfigManager.getEmbeddingService();
             
             const pageInfo = {
@@ -1411,9 +1451,9 @@ class BookmarkManager {
                 tags: tags,
                 excerpt: editedExcerpt,
                 embedding: embedding,
-                savedAt: this.isEditMode ? this.editingBookmark.savedAt : new Date().toISOString(),
+                savedAt: this.isEditMode ? this.editingBookmark.savedAt : Date.now(),
                 useCount: this.isEditMode ? this.editingBookmark.useCount : 1,
-                lastUsed: this.isEditMode ? this.editingBookmark.lastUsed : new Date().toISOString(),
+                lastUsed: this.isEditMode ? this.editingBookmark.lastUsed : Date.now(),
                 apiService: this.isEditMode ? this.editingBookmark.apiService : apiService.id,
                 embedModel: this.isEditMode ? this.editingBookmark.embedModel : apiService.embedModel,
             };
@@ -1424,9 +1464,15 @@ class BookmarkManager {
                 before: this.isEditMode ? this.editingBookmark : null,
                 after: pageInfo
             });
-            
+
+            // 如果编辑模式下URL发生变化，则先删除旧书签
+            if (this.isEditMode && this.editingBookmark.url !== url) {
+                await LocalStorageMgr.removeBookmark(this.editingBookmark.url);
+                await recordBookmarkChange(this.editingBookmark, true, false);
+            }
+                        
             await LocalStorageMgr.setBookmark(url, pageInfo);
-            await recordBookmarkChange(pageInfo, false, true, onSyncError);
+            await recordBookmarkChange(pageInfo, false, true);
 
             await refreshBookmarksInfo();
             StatusManager.endOperation(this.isEditMode ? '书签更新成功' : '书签保存成功', false);
@@ -2015,7 +2061,10 @@ async function renderBookmarksList(localCache = false) {
     }
 
     try {
+        // 如果当前渲染器存在，则清理
+        let rendererState;
         if (currentRenderer) {
+            rendererState = currentRenderer.getRendererState();
             currentRenderer.cleanup();
             currentRenderer = null;
         }
@@ -2038,9 +2087,9 @@ async function renderBookmarksList(localCache = false) {
         let bookmarks = data.map((item) => ({
                 ...item,
                 // 统一使用时间戳进行比较
-                savedAt: item.savedAt ? new Date(item.savedAt).getTime() : 0,
+                savedAt: item.savedAt ? getDateTimestamp(item.savedAt) || 0 : 0,
                 useCount: calculateWeightedScore(item.useCount, item.lastUsed),
-                lastUsed: item.lastUsed ? new Date(item.lastUsed).getTime() : 0
+                lastUsed: item.lastUsed ? getDateTimestamp(item.lastUsed) || 0 : 0
             }));
         // 添加空状态处理
         if (bookmarks.length === 0) {
@@ -2119,7 +2168,7 @@ async function renderBookmarksList(localCache = false) {
         } else {
             currentRenderer = new BookmarkRenderer(bookmarksList, bookmarks);
         }
-        await currentRenderer.initialize();
+        await currentRenderer.initialize(rendererState);
         logger.debug('renderBookmarksList 完成');
     } catch (error) {
         logger.error('渲染书签列表失败:', error);
@@ -2158,6 +2207,10 @@ async function initializeViewModeSwitch() {
             button.classList.remove('active');
         }
     });
+    // 判断如果没有active的按钮，则设置为list
+    if (!Array.from(viewButtons).some(button => button.classList.contains('active'))) {
+        viewButtons[0].classList.add('active');
+    }
     filterManager.toggleDisplayFilter(savedViewMode === 'list');
 
     viewButtons.forEach(button => {
@@ -2192,12 +2245,21 @@ const PAGINATION = {
 // 书签渲染器类
 class BookmarkRenderer {
     constructor(container, bookmarks) {
+        this.rendererType = 'list';
         this.container = container;
         this.allBookmarks = bookmarks;
         this.displayedCount = 0;
+        this.initialDisplayedCount = PAGINATION.INITIAL_SIZE;
         this.loading = false;
         this.observer = null;
         this.loadingIndicator = null;
+    }
+
+    getRendererState() {
+        return {
+            rendererType: this.rendererType,
+            displayedCount: this.displayedCount
+        };
     }
 
     // 添加清理方法
@@ -2221,9 +2283,19 @@ class BookmarkRenderer {
         this.loading = false;
     }
 
-    async initialize() {
+    async restoreRendererState(state) {
+        if (state.rendererType !== this.rendererType) {
+            return;
+        }
+        this.initialDisplayedCount = state.displayedCount;
+    }    
+
+    async initialize(state={}) {
         // 清理之前的实例
         this.cleanup();
+
+        // 恢复渲染器状态
+        await this.restoreRendererState(state);
 
         // 初始化编辑模式
         const bookmarkManager = getBookmarkManager();
@@ -2241,7 +2313,7 @@ class BookmarkRenderer {
         this.container.parentNode.appendChild(this.loadingIndicator);
 
         // 初始渲染
-        await this.renderBookmarks(0, PAGINATION.INITIAL_SIZE);
+        await this.renderBookmarks(0, this.initialDisplayedCount);
 
         // 设置无限滚动
         this.setupInfiniteScroll();
@@ -2465,12 +2537,42 @@ class BookmarkRenderer {
 }
 
 class GroupedBookmarkRenderer extends BookmarkRenderer {
-    constructor(container, bookmarks) {
-        super(container, bookmarks);
+    constructor(container, bookmarks, state={}) {
+        super(container, bookmarks, state);
+        this.rendererType = 'grouped';
         this.groups = [];
+        this.collapsedStates = new Map(); // 存储每个分组的折叠状态
     }
 
-    async initialize() {
+    getRendererState() {
+        return {
+            rendererType: this.rendererType,
+            collapsedStates: new Map(this.collapsedStates) // 创建新的Map
+        };
+    }
+
+    async restoreRendererState(state) {
+        if (state.rendererType !== this.rendererType) {
+            return;
+        }
+        if (state.collapsedStates && state.collapsedStates instanceof Map) {
+            this.collapsedStates = state.collapsedStates;
+        } 
+    }
+
+    async initialize(state={}) {
+        // 清理之前的实例
+        this.cleanup();
+
+        // 恢复渲染器状态
+        await this.restoreRendererState(state);
+
+        // 从 storage 读取折叠状态
+        if (this.collapsedStates.size === 0) {
+            const groupCollapsedStates = await LocalStorageMgr.getCustomGroupCollapsedStates();
+            this.collapsedStates = new Map(Object.entries(groupCollapsedStates));
+        }
+
         // 获取所有自定义标签规则
         const rules = customFilter.getRules();
         
@@ -2501,6 +2603,20 @@ class GroupedBookmarkRenderer extends BookmarkRenderer {
         }
         
         await this.render();
+    }
+
+    // 保存折叠状态到 storage
+    async saveCollapsedStates() {
+        // 清理失效的分组状态
+        const validGroupIds = this.groups.map(group => group.rule.id);
+        for (const [groupId] of this.collapsedStates) {
+            if (!validGroupIds.includes(groupId)) {
+                this.collapsedStates.delete(groupId);
+            }
+        }
+        
+        const states = Object.fromEntries(this.collapsedStates);
+        await LocalStorageMgr.setCustomGroupCollapsedStates(states);
     }
 
     async render() {
@@ -2544,14 +2660,32 @@ class GroupedBookmarkRenderer extends BookmarkRenderer {
             // 绑定折叠事件
             header.addEventListener('click', () => {
                 const toggle = header.querySelector('.group-toggle');
-                toggle.classList.toggle('collapsed');
+                const isCollapsed = toggle.classList.toggle('collapsed');
                 content.classList.toggle('collapsed');
+                
+                // 更新并保存折叠状态
+                this.collapsedStates.set(group.rule.id, isCollapsed);
+                this.saveCollapsedStates();
             });
 
-            if (index === 0) {
+            // 应用保存的折叠状态
+            const isCollapsed = this.collapsedStates.get(group.rule.id);
+            if (isCollapsed !== undefined) {
                 const toggle = header.querySelector('.group-toggle');
-                toggle.classList.toggle('collapsed');
-                content.classList.toggle('collapsed');
+                if (isCollapsed) {
+                    toggle.classList.add('collapsed');
+                    content.classList.add('collapsed');
+                } else {
+                    toggle.classList.remove('collapsed');
+                    content.classList.remove('collapsed');
+                }
+            } else if (index === 0) {
+                // 如果是第一次打开，默认展开第一个分组
+                const toggle = header.querySelector('.group-toggle');
+                toggle.classList.remove('collapsed');
+                content.classList.remove('collapsed');
+                this.collapsedStates.set(group.rule.id, false);
+                this.saveCollapsedStates();
             }
             
             groupElement.appendChild(header);
@@ -2599,6 +2733,7 @@ class SettingsDialog {
             manualPrivacyContainer: document.getElementById('manual-privacy-container'),
             shortcutsBtn: document.getElementById('keyboard-shortcuts'),
             openSettingsPageBtn: document.getElementById('open-settings-page'),
+            donateButton: document.getElementById('donate-button'),
             feedbackBtn: document.getElementById('feedback-button'),
             storeReviewButton: document.getElementById('store-review-button'),
             showUpdateLogBtn: document.getElementById('show-update-log'),
@@ -2690,16 +2825,45 @@ class SettingsDialog {
         
         // 添加商店评价按钮点击事件
         this.elements.storeReviewButton.addEventListener('click', () => {
-            // 获取扩展ID并打开Chrome商店评价页面
+            // 获取扩展ID
             const extensionId = chrome.runtime.id;
-            const storeUrl = `https://chrome.google.com/webstore/detail/${extensionId}`;
+            
+            // 判断浏览器类型并选择对应的商店链接
+            const userAgent = navigator.userAgent;
+            // Edge 的 userAgent 包含 "Edg"，Chrome 的 userAgent 包含 "Chrome" 但不包含 "Edg"
+            const isEdge = userAgent.indexOf('Edg') !== -1;
+            const isChrome = userAgent.indexOf('Chrome') !== -1 && !isEdge;
+            
+            let storeUrl;
+            if (isEdge) {
+                // Edge 商店链接
+                storeUrl = `https://microsoftedge.microsoft.com/addons/detail/${extensionId}`;
+            } else if (isChrome) {
+                // Chrome 商店链接
+                storeUrl = `https://chrome.google.com/webstore/detail/${extensionId}`;
+            } else {
+                // 默认使用 Chrome 商店链接（兼容其他基于 Chromium 的浏览器）
+                storeUrl = `https://chrome.google.com/webstore/detail/nlboajobccgidfcdoedphgfaklelifoa`;
+            }
+            
             chrome.tabs.create({ url: storeUrl });
+            this.close();
+        });
+
+        // 添加捐赠按钮点击事件
+        this.elements.donateButton.addEventListener('click', () => {
+            chrome.tabs.create({
+                url: 'https://howoii.github.io/smartbookmark-support/donate.html'
+            });
             this.close();
         });
 
         // 添加查看更新日志按钮点击事件
         this.elements.showUpdateLogBtn.addEventListener('click', () => {
-            showUpdateNotification();
+            // 获取当前版本
+            const manifest = chrome.runtime.getManifest();
+            const currentVersion = manifest.version;
+            showUpdateNotification(currentVersion);
             this.close();
         });
 
@@ -2714,7 +2878,7 @@ class SettingsDialog {
         this.elements.viewAllUpdatesLink.addEventListener('click', (e) => {
             e.preventDefault();
             // 打开更新日志页面
-            chrome.tabs.create({ url: `${SERVER_URL}/changelog` });
+            chrome.tabs.create({ url: `https://howoii.github.io/smartbookmark-support/changelog.html`});
         });
 
         // 添加点击背景关闭功能
@@ -2775,6 +2939,8 @@ class SettingsDialog {
         if (autoFocusSearchContainer) {
             autoFocusSearchContainer.classList.add('hide');
         }
+        this.elements.feedbackBtn.style.display = 'none';
+        this.elements.showUpdateLogBtn.style.display = 'none';
     }
 
     async handleSettingChange(settingPath, value, additionalAction = null) {
@@ -2922,7 +3088,11 @@ async function renderSearchHistory(query) {
 
     // 如果有搜索内容，则过滤历史记录与搜索内容不匹配的
     if (query) {
-        history = history.filter(item => item.query.includes(query));
+        history = history.filter(item => {
+            // 同时匹配原文和拼音
+            return item.query.toLowerCase().includes(query) || 
+                    PinyinMatch.match(item.query, query);
+        });
     }
     
     // 如果历史记录为空，则不显示
@@ -2997,6 +3167,12 @@ async function initializeSortDropdown() {
             </svg>
         `;
         sortButton.appendChild(indicator);
+
+        // 更新所有选项的选中状态
+        sortOptions.forEach(option => {
+            option.classList.remove('selected');
+        });
+        selectedOption.classList.add('selected');
     }
 
     // 点击按钮显示/隐藏下拉菜单
@@ -3008,10 +3184,6 @@ async function initializeSortDropdown() {
     sortOptions.forEach(option => {
         option.addEventListener('click', async () => {
             const value = option.dataset.value;
-            
-            // 更新选中状态
-            sortOptions.forEach(opt => opt.classList.remove('selected'));
-            option.classList.add('selected');
             
             // 更新按钮显示
             updateSortButton(option);
@@ -3040,7 +3212,6 @@ async function initializeSortDropdown() {
     const savedSort = await SettingsManager.get('sort.bookmarks');
     const selectedOption = sortDropdown.querySelector(`[data-value="${savedSort}"]`);
     if (selectedOption) {
-        selectedOption.classList.add('selected');
         updateSortButton(selectedOption);
     }
 }
@@ -3206,9 +3377,19 @@ function showTooltip(li, bookmark) {
             day: 'numeric'
         });
         
+        // 提取域名
+        let domain = '';
+        try {
+            const urlObj = new URL(bookmark.url);
+            domain = urlObj.hostname.replace(/^www\./, ''); // 移除 www. 前缀
+        } catch (e) {
+            // 如果 URL 解析失败，使用原始 URL
+            domain = bookmark.url;
+        }
+        
         // 更新tooltip内容
         tooltip.querySelector('.bookmark-tooltip-title').textContent = bookmark.title;
-        tooltip.querySelector('.bookmark-tooltip-url').textContent = bookmark.url;
+        tooltip.querySelector('.bookmark-tooltip-url span').textContent = domain;
         tooltip.querySelector('.bookmark-tooltip-tags').innerHTML = tags;
         
         // 添加对摘要的处理
@@ -3289,6 +3470,7 @@ async function checkForUpdates() {
 async function showUpdateNotification(version) {
     // 获取更新内容
     const updateContent = getUpdateContent(version);
+    logger.info('更新内容:', updateContent, version);
     if (!updateContent) {
         return;
     }
@@ -3319,7 +3501,7 @@ async function showUpdateNotification(version) {
 function getUpdateContent(version) {
     // 这里可以根据不同版本返回不同的更新内容
     const updateNotes = {
-        '1.2.0': {
+        '1.2.4': {
             title: `v${version} 版本更新内容`,
             content: `
                 <ul>
@@ -3330,21 +3512,6 @@ function getUpdateContent(version) {
             `
         }
     };
-    
-    // 如果找不到当前版本的更新内容，返回一个默认的
-    if (!version || !updateNotes[version]) {
-        return {
-            title: `最近添加的内容`,
-            content: `
-                <ul>
-                    <li>优化了同步功能，新增<a href="settings.html#sync">WebDAV同步</a></li>
-                    <li>支持删除搜索历史 <a href="settings.html#overview">去查看</a></li>
-                    <li>支持在搜索结果中编辑和删除书签</li>
-                    <li>支持批量选择和删除书签</li>
-                </ul>
-            `
-        };
-    }
     
     return updateNotes[version];
 }

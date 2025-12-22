@@ -915,7 +915,22 @@ input:checked + .slider:before {
 
 .status-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
+    align-items: center;
+}
+
+.status-actions .sync-link {
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.status-actions .sync-link:hover {
+    color: var(--action-color);
 }
 
 .username {
@@ -1684,8 +1699,8 @@ select:disabled {
 .tag-item {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
+    gap: 0px;
+    padding: 2px 6px;
     background: var(--tag-recommended-bg);
     color: var(--tag-recommended-text);
     border-radius: 4px;
@@ -1706,14 +1721,14 @@ select:disabled {
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    font-size: 12px;
+    font-size: 13px;
     margin-left: 2px;
     color: var(--tag-recommended-text);
     transition: all 0.2s;
 }
 
 .tag-item .remove-tag:hover {
-    background: rgba(25, 118, 210, 0.1);
+    color: var(--danger-color);
 }
 
 .tags-input {
@@ -3927,6 +3942,20 @@ input[type="radio"]:checked + .radio-mark::after {
     height: 20px;
 }
 
+/* 捐赠链接特殊样式 - 使用红色突出显示 */
+.project-link-donate {
+    color: var(--donate-color);
+    border: 1px solid var(--donate-color);
+}
+
+.project-link-donate:hover {
+    background: var(--donate-color);
+    color: var(--text-fifth);
+    border-color: var(--donate-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(var(--donate-color-rgb), 0.3);
+}
+
 /* 动画效果 */
 .about-section {
     animation: fadeInUp 0.5s ease;
@@ -4400,4 +4429,12 @@ input[type="radio"]:checked + .radio-mark::after {
 /* 默认状态下隐藏图标 */
 .service-status-icon:not(.is-valid):not(.is-invalid) {
     opacity: 0;
+}
+
+/* 隐藏未启用的功能 */
+#login-status-card.disabled, 
+#cloud-sync-card.disabled,
+#cloud-config-dialog.disabled,
+#feedback-link.disabled {
+    display: none;
 }

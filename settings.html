@@ -59,7 +59,7 @@
                     <i class="icon-changelog"></i>
                     <span>更新日志</span>
                 </a>
-                <a href="#" class="footer-link" id="feedback-link">
+                <a href="#" class="footer-link disabled" id="feedback-link">
                     <i class="icon-feedback"></i>
                     <span>提交反馈</span>
                 </a>
@@ -73,9 +73,9 @@
             <!-- 概述部分 -->
             <div class="settings-section" id="overview-section">
                 <h2>基本设置</h2>
-                
+
                 <!-- 添加登录状态卡片 -->
-                <div class="login-status-card">
+                <div class="login-status-card disabled" id="login-status-card" data-feature="login">
                     <div class="status-header">
                         <h3>账号状态</h3>
                     </div>
@@ -92,10 +92,11 @@
                     <!-- 未登录状态模板 -->
                     <template id="logged-out-template">
                         <div class="status-box logged-out">
-                            您尚未登录，请先登录以使用书签同步功能
+                            您尚未登录，登录后可使用同步功能（您也可以选择使用WebDAV进行同步而无需登录）
                         </div>
                         <div class="status-actions">
                             <a class="login-btn" target="_blank">去登录</a>
+                            <a class="sync-link" target="_blank">同步设置</a>
                         </div>
                     </template>
                     <div id="loginStatus" class="status-content">
@@ -106,6 +107,75 @@
                     </div>
                 </div>
                 
+                <!-- 添加快捷键设置卡片 -->
+                <div class="shortcuts-settings-card">
+                    <div class="card-header">
+                        <h3>快捷键设置</h3>
+                        <div class="shortcut-actions">
+                            <button id="edit-shortcuts-btn" class="icon-btn" title="在 Chrome 扩展管理页面修改快捷键">
+                                <svg viewBox="0 0 24 24" width="20" height="20">
+                                    <path fill="currentColor" d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/>
+                                </svg>
+                                <span>设置快捷键</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="shortcuts-grid">
+                        <div class="shortcut-item">
+                            <div class="shortcut-info">
+                                <span class="shortcut-name shortcut-save">快速保存书签</span>
+                                <span class="shortcut-key" id="quickSave-shortcut">未设置</span>
+                            </div>
+                            <div class="shortcut-description">快速保存当前页面为书签</div>
+                        </div>
+                        <div class="shortcut-item">
+                            <div class="shortcut-info">
+                                <span class="shortcut-name shortcut-search">快速搜索书签</span>
+                                <span class="shortcut-key" id="quickSearch-shortcut">未设置</span>
+                            </div>
+                            <div class="shortcut-description">打开快速搜索面板</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 添加外观设置卡片 -->
+                <div class="appearance-settings-card">
+                    <h3>外观设置</h3>
+                    <div class="settings-grid">
+                        <div class="setting-item-card">
+                            <div class="form-group">
+                                <label>主题</label>
+                                <div class="theme-selector">
+                                    <div class="theme-option" data-theme="light">
+                                        <div class="theme-preview">
+                                            <svg viewBox="0 0 24 24" width="24" height="24">
+                                                <path fill="currentColor" d="M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,2L14.39,5.42C13.65,5.15 12.84,5 12,5C11.16,5 10.35,5.15 9.61,5.42L12,2M3.34,7L7.5,6.65C6.9,7.16 6.36,7.78 5.94,8.5C5.5,9.24 5.25,10 5.11,10.79L3.34,7M3.36,17L5.12,13.23C5.26,14 5.53,14.78 5.95,15.5C6.37,16.24 6.91,16.86 7.5,17.37L3.36,17M20.65,7L18.88,10.79C18.74,10 18.47,9.23 18.05,8.5C17.63,7.78 17.1,7.15 16.5,6.64L20.65,7M20.64,17L16.5,17.36C17.09,16.85 17.62,16.22 18.04,15.5C18.46,14.77 18.73,14 18.87,13.21L20.64,17M12,22L9.59,18.56C10.33,18.83 11.14,19 12,19C12.82,19 13.63,18.83 14.37,18.56L12,22Z"/>
+                                            </svg>
+                                        </div>
+                                        <div class="theme-label">浅色</div>
+                                    </div>
+                                    <div class="theme-option" data-theme="dark">
+                                        <div class="theme-preview">
+                                            <svg viewBox="0 0 24 24" width="24" height="24">
+                                                <path fill="currentColor" d="M12,3C7.03,3 3,7.03 3,12C3,16.97 7.03,21 12,21C16.97,21 21,16.97 21,12C21,7.03 16.97,3 12,3M12,19C8.14,19 5,15.86 5,12C5,8.14 8.14,5 12,5C15.86,5 19,8.14 19,12C19,15.86 15.86,19 12,19M12,17C14.76,17 17,14.76 17,12C17,9.24 14.76,7 12,7V17Z"/>
+                                            </svg>
+                                        </div>
+                                        <div class="theme-label">深色</div>
+                                    </div>
+                                    <div class="theme-option" data-theme="system">
+                                        <div class="theme-preview">
+                                            <svg viewBox="0 0 24 24" width="24" height="24">
+                                                <path fill="currentColor" d="M12,18V6A6,6 0 0,1 18,12A6,6 0 0,1 12,18M20,15.31L23.31,12L20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31Z"/>
+                                            </svg>
+                                        </div>
+                                        <div class="theme-label">设备</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 修改搜索设置部分 -->
                 <div class="search-settings-card">
                     <h3>搜索设置</h3>
@@ -180,75 +250,6 @@
                                 <div id="sites-display-count-container" class="quick-search-sites-row">
                                     <label for="sites-display-count">显示数量：</label>
                                     <input type="number" id="sites-display-count" min="1" max="50" value="10">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 添加快捷键设置卡片 -->
-                <div class="shortcuts-settings-card">
-                    <div class="card-header">
-                        <h3>快捷键设置</h3>
-                        <div class="shortcut-actions">
-                            <button id="edit-shortcuts-btn" class="icon-btn" title="在 Chrome 扩展管理页面修改快捷键">
-                                <svg viewBox="0 0 24 24" width="20" height="20">
-                                    <path fill="currentColor" d="M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/>
-                                </svg>
-                                <span>设置快捷键</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="shortcuts-grid">
-                        <div class="shortcut-item">
-                            <div class="shortcut-info">
-                                <span class="shortcut-name shortcut-save">快速保存书签</span>
-                                <span class="shortcut-key" id="quickSave-shortcut">未设置</span>
-                            </div>
-                            <div class="shortcut-description">快速保存当前页面为书签</div>
-                        </div>
-                        <div class="shortcut-item">
-                            <div class="shortcut-info">
-                                <span class="shortcut-name shortcut-search">快速搜索书签</span>
-                                <span class="shortcut-key" id="quickSearch-shortcut">未设置</span>
-                            </div>
-                            <div class="shortcut-description">打开快速搜索面板</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 添加外观设置卡片 -->
-                <div class="appearance-settings-card">
-                    <h3>外观设置</h3>
-                    <div class="settings-grid">
-                        <div class="setting-item-card">
-                            <div class="form-group">
-                                <label>主题</label>
-                                <div class="theme-selector">
-                                    <div class="theme-option" data-theme="light">
-                                        <div class="theme-preview">
-                                            <svg viewBox="0 0 24 24" width="24" height="24">
-                                                <path fill="currentColor" d="M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,2L14.39,5.42C13.65,5.15 12.84,5 12,5C11.16,5 10.35,5.15 9.61,5.42L12,2M3.34,7L7.5,6.65C6.9,7.16 6.36,7.78 5.94,8.5C5.5,9.24 5.25,10 5.11,10.79L3.34,7M3.36,17L5.12,13.23C5.26,14 5.53,14.78 5.95,15.5C6.37,16.24 6.91,16.86 7.5,17.37L3.36,17M20.65,7L18.88,10.79C18.74,10 18.47,9.23 18.05,8.5C17.63,7.78 17.1,7.15 16.5,6.64L20.65,7M20.64,17L16.5,17.36C17.09,16.85 17.62,16.22 18.04,15.5C18.46,14.77 18.73,14 18.87,13.21L20.64,17M12,22L9.59,18.56C10.33,18.83 11.14,19 12,19C12.82,19 13.63,18.83 14.37,18.56L12,22Z"/>
-                                            </svg>
-                                        </div>
-                                        <div class="theme-label">浅色</div>
-                                    </div>
-                                    <div class="theme-option" data-theme="dark">
-                                        <div class="theme-preview">
-                                            <svg viewBox="0 0 24 24" width="24" height="24">
-                                                <path fill="currentColor" d="M12,3C7.03,3 3,7.03 3,12C3,16.97 7.03,21 12,21C16.97,21 21,16.97 21,12C21,7.03 16.97,3 12,3M12,19C8.14,19 5,15.86 5,12C5,8.14 8.14,5 12,5C15.86,5 19,8.14 19,12C19,15.86 15.86,19 12,19M12,17C14.76,17 17,14.76 17,12C17,9.24 14.76,7 12,7V17Z"/>
-                                            </svg>
-                                        </div>
-                                        <div class="theme-label">深色</div>
-                                    </div>
-                                    <div class="theme-option" data-theme="system">
-                                        <div class="theme-preview">
-                                            <svg viewBox="0 0 24 24" width="24" height="24">
-                                                <path fill="currentColor" d="M12,18V6A6,6 0 0,1 18,12A6,6 0 0,1 12,18M20,15.31L23.31,12L20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31Z"/>
-                                            </svg>
-                                        </div>
-                                        <div class="theme-label">设备</div>
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -774,12 +775,12 @@
             <div class="settings-section" id="sync-section">
                 <h2>同步</h2>
                 <div class="section-description">
-                    配置数据同步服务以在不同设备间同步您的书签和个性化设置，建议仅启用单一同步服务以避免数据冲突
+                    配置数据同步服务以在不同设备间同步您的书签和个性化设置
                 </div>
                 
                 <div class="sync-services-container">
                     <!-- 云同步服务卡片 -->
-                    <div class="sync-service-card" id="cloud-sync-card">
+                    <div class="sync-service-card disabled" id="cloud-sync-card" data-feature="cloud-sync">
                         <div class="sync-service-header">
                             <div class="sync-service-top">
                                 <div class="sync-service-name">
@@ -940,6 +941,12 @@
                                     <path fill="currentColor" d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
                                 </svg>
                                 <span>评分反馈</span>
+                            </a>
+                            <a href="https://howoii.github.io/smartbookmark-support/donate.html" target="_blank" class="project-link project-link-donate">
+                                <svg viewBox="0 0 24 24" width="20" height="20">
+                                    <path fill="currentColor" d="M12,21.35L10.55,20.03C5.4,15.36 2,12.27 2,8.5C2,5.41 4.42,3 7.5,3C9.24,3 10.91,3.81 12,5.08C13.09,3.81 14.76,3 16.5,3C19.58,3 22,5.41 22,8.5C22,12.27 18.6,15.36 13.45,20.03L12,21.35Z" />
+                                </svg>
+                                <span>资助开发</span>
                             </a>
                         </div>
                     </div>
@@ -1410,7 +1417,7 @@
         </div>
 
         <!-- 云同步配置对话框 -->
-        <div id="cloud-config-dialog" class="dialog">
+        <div id="cloud-config-dialog" class="dialog disabled" data-feature="cloud-sync">
             <div class="dialog-content">
                 <div class="dialog-header">
                     <h3>云同步设置</h3>

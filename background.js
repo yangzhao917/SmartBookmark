@@ -92,16 +92,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sender: sender,
     });
 
-    if (message.type === MessageType.FORCE_SYNC_BOOKMARK) {
-        syncManager.startSync(true)
-            .then(() => sendResponse({ success: true }))
-            .catch(error => {
-                logger.error('Error during sync:', error);
-                sendResponse({ success: false, error: error.message });
-            });
-
-        return true;
-    } else if (message.type === MessageType.SYNC_BOOKMARK_CHANGE) {
+    if (message.type === MessageType.SYNC_BOOKMARK_CHANGE) {
         syncManager.recordBookmarkChange(message.data.bookmarks, message.data.isDeleted)
             .then(() => sendResponse({ success: true }))
             .catch(error => {
@@ -121,6 +112,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
         return true;
     } else if (message.type === MessageType.EXECUTE_CLOUD_SYNC) {
+        // 检查云同步功能是否启用
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            sendResponse({ success: false, error: '云同步功能已禁用' });
+            return;
+        }
         // 执行云同步
         AutoSyncManager.executeCloudSync()
             .then(result => {
@@ -168,7 +164,11 @@ chrome.runtime.onMessageExternal.addListener(async (message, sender, sendRespons
     }); 
     if (sender.origin !== SERVER_URL) {
         return;
-    }   
+    }
+    // 如果登录功能被禁用，直接返回
+    if (!FEATURE_FLAGS.ENABLE_LOGIN) {
+        return;
+    }
     if (message.type === ExternalMessageType.LOGIN_SUCCESS) {
         const { token, user } = message.data;
         logger.debug('登录成功', {user: user});
@@ -345,17 +345,9 @@ if (chrome.omnibox) {
             const suggestions = results.map((result) => {
                 const title = escapeXml(result.title);
                 const url = escapeXml(result.url);
-                const tags = result.tags.map(tag => `🏷️${tag}`);
-                let tagsStr = '';
-                if (tags.length > 0) {
-                    tagsStr = tags.slice(0, 2).join(' ');
-                    tagsStr = escapeXml(tagsStr);
-                }
 
                 const description = `
-                    ${result.score > 80 ? `🌟`: ''}
                     <dim>${title}</dim>
-                    ${tagsStr ? `| <url>${tagsStr}</url>` : ''}
                     | 🔗<url>${url}</url>
                 `.trim().replace(/\s+/g, ' ');
                 return {
@@ -413,4 +405,37 @@ if (chrome.omnibox) {
 // 监听闹钟触发事件
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     await AutoSyncManager.handleAlarm(alarm);
+});
+
+// 监听书签变化事件
+chrome.bookmarks.onChanged.addListener(async (id, changeInfo, bookmark) => {
+    logger.debug('书签变化', {
+        id: id,
+        changeInfo: changeInfo,
+        bookmark: bookmark,
+    });
+});
+
+// 监听书签创建事件
+chrome.bookmarks.onCreated.addListener(async (id, bookmark) => {
+    logger.debug('书签创建', {
+        id: id,
+        bookmark: bookmark,
+    });
+});
+
+// 监听书签删除事件
+chrome.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
+    logger.debug('书签删除', {
+        id: id,
+        removeInfo: removeInfo,
+    });
+});
+
+// 监听书签移动事件
+chrome.bookmarks.onMoved.addListener(async (id, moveInfo) => {
+    logger.debug('书签移动', {
+        id: id,
+        moveInfo: moveInfo,
+    });
 });

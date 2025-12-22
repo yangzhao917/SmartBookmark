@@ -10,25 +10,25 @@ class CustomFilter {
         this.builtInRules = [
             {
                 id: 'recent-bookmarks',
-                name: '最近添加',
+                name: '今日添加',
                 isBuiltIn: true,
                 conditions: [
                     {
                         field: 'create',
-                        operator: '<',
-                        value: 7
+                        operator: '=',
+                        value: 1
                     }
                 ]
             },
             {
-                id: 'frequently-used',
-                name: '经常使用',
+                id: 'today-used',
+                name: '今日使用',
                 isBuiltIn: true,
                 conditions: [
                     {
-                        field: 'use',
-                        operator: '>',
-                        value: 5
+                        field: 'lastUse',
+                        operator: '=',
+                        value: 1
                     }
                 ]
             }
@@ -199,20 +199,26 @@ class CustomFilter {
     // 评估单个条件
     evaluateCondition(bookmark, condition) {
         const { field, operator, value } = condition;
+
+        const isValid = CustomFilterConditions.validateCondition(condition);
+        if (!isValid) {
+            logger.warn(`跳过无效的条件: ${condition}`);
+            return true;
+        }
         
         switch (field) {
             case 'title':
-                return this.evaluateTextCondition(bookmark.title, operator, value);
+                return this.evaluateTextCondition(bookmark.title, condition);
                 
             case 'domain':
                 const domain = new URL(bookmark.url).hostname;
-                return this.evaluateTextCondition(domain, operator, value);
+                return this.evaluateTextCondition(domain, condition);
             
             case 'url':
-                return this.evaluateTextCondition(bookmark.url, operator, value);
+                return this.evaluateTextCondition(bookmark.url, condition);
                 
             case 'tag':
-                return this.evaluateTagCondition(bookmark.tags, operator, value);
+                return this.evaluateTagCondition(bookmark.tags, condition);
                 
             case 'create':
                 const createDays = this.getDaysDifference(new Date(bookmark.savedAt));
@@ -232,36 +238,46 @@ class CustomFilter {
     }
 
     // 评估文本条件
-    evaluateTextCondition(text, operator, value) {
+    evaluateTextCondition(text, condition) {
         if (!text) return false;
         text = text.toLowerCase();
-        
+
+        const values = CustomFilterConditions.getConditionArrayValue(condition);
+        if (!values) return false;
+
+        const { operator } = condition;  
         switch (operator) {
             case 'is':
-                return text === value.toLowerCase();
+                return values.some(v => text === v.toLowerCase());
+            case 'isNot':
+                return !values.some(v => text === v.toLowerCase());
             case 'has':
-                if (Array.isArray(value)) {
-                    return value.some(v => text.includes(v.toLowerCase()));
-                }
-                return text.includes(value.toLowerCase());
+                return values.some(v => text.includes(v.toLowerCase()));
+            case 'notHas':
+                return !values.some(v => text.includes(v.toLowerCase()));
             default:
                 return false;
         }
     }
 
     // 评估标签条件
-    evaluateTagCondition(tags, operator, value) {
+    evaluateTagCondition(tags, condition) {
         if (!tags || !Array.isArray(tags)) return false;
         const lowerTags = tags.map(t => t.toLowerCase());
+
+        const values = CustomFilterConditions.getConditionArrayValue(condition);
+        if (!values) return false;
         
+        const { operator } = condition;
         switch (operator) {
             case 'is':
-                return lowerTags.some(tag => tag === value.toLowerCase());
+                return values.some(v => lowerTags.some(tag => tag === v.toLowerCase()));
+            case 'isNot':
+                return !values.some(v => lowerTags.some(tag => tag === v.toLowerCase()));
             case 'has':
-                if (Array.isArray(value)) {
-                    return value.some(v => lowerTags.some(tag => tag.includes(v.toLowerCase())));
-                }
-                return lowerTags.some(tag => tag.includes(value.toLowerCase()));
+                return values.some(v => lowerTags.some(tag => tag.includes(v.toLowerCase())));
+            case 'notHas':
+                return !values.some(v => lowerTags.some(tag => tag.includes(v.toLowerCase())));
             default:
                 return false;
         }
@@ -287,8 +303,12 @@ class CustomFilter {
     // 计算天数差异
     getDaysDifference(date) {
         const now = new Date();
-        const diffTime = Math.abs(now - date);
-        return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        // 将两个日期都设置为当天的 00:00:00
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfTargetDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        // 计算天数差
+        const diffTime = Math.abs(startOfToday - startOfTargetDay);
+        return Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
     }
 
     // 评估书签是否匹配规则条件
@@ -309,6 +329,103 @@ class CustomFilter {
             // 单个条件直接评估
             return this.evaluateCondition(bookmark, condition);
         });
+    }
+}
+
+class CustomFilterConditions {
+    static fields = [
+        { value: 'title', label: '标题', isNumber: false, operatorGroup: 'text'},
+        { value: 'domain', label: '域名', isNumber: false, operatorGroup: 'text' },
+        { value: 'url', label: '链接', isNumber: false, operatorGroup: 'text' },
+        { value: 'tag', label: '标签', isNumber: false, operatorGroup: 'textArray' },
+        { value: 'create', label: '创建时间', isNumber: true, unit: '天', operatorGroup: 'number' },
+        { value: 'lastUse', label: '上次使用', isNumber: true, unit: '天', operatorGroup: 'number' },
+        { value: 'use', label: '使用次数', isNumber: true, unit: '次', operatorGroup: 'number' }
+    ];
+        
+    static operators = {
+        text: [
+            { value: 'is', label: '等于'},
+            { value: 'isNot', label: '不等于' },
+            { value: 'has', label: '包含', isArray: true },
+            { value: 'notHas', label: '不包含', isArray: true }
+        ],
+        number: [
+            { value: '>', label: '大于' },
+            { value: '<', label: '小于' },
+            { value: '=', label: '等于' }
+        ],
+        textArray: [
+            { value: 'is', label: '等于', isArray: true },
+            { value: 'isNot', label: '不等于', isArray: true },
+            { value: 'has', label: '包含', isArray: true },
+            { value: 'notHas', label: '不包含', isArray: true }
+        ],
+    };
+
+    static getFields() {
+        return this.fields;
+    }
+    
+    static getFieldSettings(field) {
+        return this.fields.find(f => f.value === field);
+    }
+
+    static getOperators(operatorGroup) {
+        if (!operatorGroup) {
+            return this.operators;
+        }
+        return this.operators[operatorGroup];
+    }
+
+    static getOperatorSetting(operatorGroup, operator) {
+        const ops = this.getOperators(operatorGroup);
+        if (!ops) {
+            return null;
+        } else {
+            return ops.find(o => o.value === operator);
+        }
+    }
+
+    static validateCondition(condition) {
+        const { field, operator, value, arrayValue } = condition;
+        const fieldSetting = this.getFieldSettings(field);
+        if (!fieldSetting) {
+            return false;
+        }
+        const operatorGroup = fieldSetting.operatorGroup;
+        const opSetting = this.getOperatorSetting(operatorGroup, operator);
+        if (!opSetting) {
+            return false;
+        }
+        // 检查值是否为空
+        if (value === '' || value === null || value === undefined) {
+            return false;
+        }
+        // 如果是数组（标签），检查是否为空数组
+        if (arrayValue && Array.isArray(arrayValue) && arrayValue.length === 0) {
+            return false;
+        }
+        // 检查是否为数字
+        const isNumber = fieldSetting?.isNumber;
+        if (isNumber) {
+            const num = parseInt(value);
+            if (isNaN(num) || num < 0) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+
+    static getConditionArrayValue(condition) {
+        if (condition.arrayValue) {
+            return condition.arrayValue;
+        }
+        if (Array.isArray(condition.value)) {
+            return condition.value;
+        }
+        return [condition.value];
     }
 }
 

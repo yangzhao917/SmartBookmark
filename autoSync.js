@@ -66,6 +66,9 @@ class AutoSyncManager {
      * 设置云同步闹钟
      */
     static async setupCloudSync() {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return;
+        }
         try {
             // 获取云同步配置
             const config = await SyncSettingsManager.getServiceConfig('cloud');
@@ -140,6 +143,10 @@ class AutoSyncManager {
      * @param {Object} config - 云同步配置
      */
     static async updateCloudSyncAlarm(config) {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            await chrome.alarms.clear(this.CLOUD_ALARM_NAME);
+            return;
+        }
         // 获取当前闹钟
         const alarm = await chrome.alarms.get(this.CLOUD_ALARM_NAME);
         
@@ -201,6 +208,9 @@ class AutoSyncManager {
      * @returns {Promise<boolean>} 配置是否有效
      */
     static async validateCloudConfig() {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return false;
+        }
         try {
             // 检查是否已登录
             const {valid} = await validateToken();
@@ -284,6 +294,10 @@ class AutoSyncManager {
         }
         // 处理云同步闹钟
         else if (alarm.name === this.CLOUD_ALARM_NAME) {
+            if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+                await chrome.alarms.clear(this.CLOUD_ALARM_NAME);
+                return;
+            }
             try {
                 logger.debug('云同步自动同步闹钟触发');
                 
@@ -357,6 +371,9 @@ class AutoSyncManager {
     }
 
     static async scheduleCloudSync(data = {}) {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return;
+        }
         if (data.reason !== ScheduleSyncReason.BOOKMARKS) {
             return;
         }
@@ -489,6 +506,12 @@ class AutoSyncManager {
     }
 
     static async executeCloudSync() {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return {
+                success: false,
+                error: '云同步功能已禁用'
+            };
+        }
         const isLocked = await this.lockSync('cloud');
         if (!isLocked) {
             return {

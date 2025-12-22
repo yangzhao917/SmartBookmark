@@ -422,9 +422,9 @@ class QuickSearchManager {
         let bookmarks = Object.values(data).map((item) => ({
                 ...item,
                 // 统一使用时间戳进行比较
-                savedAt: item.savedAt ? new Date(item.savedAt).getTime() : 0,
+                savedAt: item.savedAt ? getDateTimestamp(item.savedAt) || 0 : 0,
                 useCount: calculateWeightedScore(item.useCount, item.lastUsed),
-                lastUsed: item.lastUsed ? new Date(item.lastUsed).getTime() : 0
+                lastUsed: item.lastUsed ? getDateTimestamp(item.lastUsed) || 0 : 0
             }));
         
         bookmarks.sort((a, b) => {
@@ -782,7 +782,11 @@ class QuickSearchManager {
 
         // 如果有搜索内容，则过滤历史记录
         if (query) {
-            history = history.filter(item => item.query.toLowerCase().includes(query));
+            history = history.filter(item => {
+                // 同时匹配原文和拼音
+                return item.query.toLowerCase().includes(query) || 
+                       PinyinMatch.match(item.query, query);
+            });
         }
         
         // 如果历史记录为空，则不显示

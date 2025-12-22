@@ -116,7 +116,7 @@ function joinUrl(baseUrl, path) {
     return baseUrl + '/' + path;
 }
 
-const MAX_CUSTOM_SERVICES = 3;
+const MAX_CUSTOM_SERVICES = 11;
 
 class ConfigManager {
     static STORAGE = chrome.storage.sync;

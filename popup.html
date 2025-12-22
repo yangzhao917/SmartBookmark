@@ -15,16 +15,23 @@
         <!-- 添加悬浮提示框 -->
         <div id="global-bookmark-tooltip" class="bookmark-tooltip">
             <div class="bookmark-tooltip-title"></div>
-            <div class="bookmark-tooltip-url"></div>
             <div class="bookmark-tooltip-excerpt">
                 <p></p>
             </div>
             <div class="bookmark-tooltip-tags"></div>
-            <div class="bookmark-tooltip-time">
-                <svg viewBox="0 0 24 24" width="14" height="14">
-                    <path fill="currentColor" d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z" />
-                </svg>
-                <span></span>
+            <div class="bookmark-tooltip-footer">
+                <div class="bookmark-tooltip-url">
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                        <path fill="currentColor" d="M3.9,12C3.9,10.29 5.29,8.9 7,8.9H11V7H7A5,5 0 0,0 2,12A5,5 0 0,0 7,17H11V15.1H7C5.29,15.1 3.9,13.71 3.9,12M8,13H16V11H8V13M17,7H13V8.9H17C18.71,8.9 20.1,10.29 20.1,12C20.1,13.71 18.71,15.1 17,15.1H13V17H17A5,5 0 0,0 22,12A5,5 0 0,0 17,7Z" />
+                    </svg>
+                    <span></span>
+                </div>
+                <div class="bookmark-tooltip-time">
+                    <svg viewBox="0 0 24 24" width="14" height="14">
+                        <path fill="currentColor" d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z" />
+                    </svg>
+                    <span></span>
+                </div>
             </div>
         </div>
         
@@ -99,12 +106,12 @@
             <div class="controls-container">
                 <div class="controls-left-group">
                     <div class="view-mode-switch">
-                        <button class="view-mode-button active" data-mode="list" title="列表视图">
+                        <button class="view-mode-button" data-mode="list" title="列表视图">
                             <svg viewBox="0 0 24 24" width="16" height="16">
                                 <path fill="currentColor" d="M3,4H21V8H3V4M3,10H21V14H3V10M3,16H21V20H3V16Z"/>
                             </svg>
                         </button>
-                        <button class="view-mode-button active" data-mode="group" title="分组视图">
+                        <button class="view-mode-button" data-mode="group" title="分组视图">
                             <svg viewBox="0 0 24 24" width="16" height="16">
                                 <path fill="currentColor" d="M3,3H11V11H3V3M3,13H11V21H3V13M13,3H21V11H13V3M13,13H21V21H13V13Z"/>
                             </svg>
@@ -404,13 +411,18 @@
                             <path fill="currentColor" d="M19 10H17V8H19M19 13H17V11H19M16 10H14V8H16M16 13H14V11H16M16 17H8V15H16M7 10H5V8H7M7 13H5V11H7M8 11H10V13H8M8 8H10V10H8M11 11H13V13H11M11 8H13V10H11M20 5H4C2.89 5 2 5.89 2 7V17C2 18.11 2.9 19 4 19H20C21.11 19 22 18.11 22 17V7C22 5.89 21.1 5 20 5Z" />
                         </svg>
                     </button>
-                    <button id="show-update-log" class="icon-button" title="新变化" style="display: none;">
+                    <button id="show-update-log" class="icon-button" title="新变化">
                         <svg viewBox="0 0 24 24" width="20" height="20">
                             <path fill="currentColor" d="M18,22A2,2 0 0,0 20,20V4C20,2.89 19.1,2 18,2H12V9L9.5,7.5L7,9V2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18M13,15V13H16V15H13M13,11H16V9H13V11Z" />
                         </svg>
                     </button>
                 </div>
                 <div class="right-group">
+                    <button id="donate-button" class="icon-button" title="捐赠支持">
+                        <svg viewBox="0 0 24 24" width="20" height="20">
+                            <path fill="currentColor" d="M12,21.35L10.55,20.03C5.4,15.36 2,12.27 2,8.5C2,5.41 4.42,3 7.5,3C9.24,3 10.91,3.81 12,5.08C13.09,3.81 14.76,3 16.5,3C19.58,3 22,5.41 22,8.5C22,12.27 18.6,15.36 13.45,20.03L12,21.35Z" />
+                        </svg>
+                    </button>
                     <button id="feedback-button" class="icon-button" title="提交反馈">
                         <svg viewBox="0 0 24 24" width="20" height="20">
                             <path fill="currentColor" d="M12,3C6.5,3 2,6.58 2,11C2.05,13.15 3.06,15.17 4.75,16.5C4.75,17.1 4.33,18.67 2,21C2,21 5.55,21 8.47,18.5C9.57,18.82 10.76,19 12,19C17.5,19 22,15.42 22,11C22,6.58 17.5,3 12,3M7,10C7.83,10 8.5,10.67 8.5,11.5C8.5,12.33 7.83,13 7,13C6.17,13 5.5,12.33 5.5,11.5C5.5,10.67 6.17,10 7,10M12,10C12.83,10 13.5,10.67 13.5,11.5C13.5,12.33 12.83,13 12,13C11.17,13 10.5,12.33 10.5,11.5C10.5,10.67 11.17,10 12,10M17,10C17.83,10 18.5,10.67 18.5,11.5C18.5,12.33 17.83,13 17,13C16.17,13 15.5,12.33 15.5,11.5C15.5,10.67 16.17,10 17,10Z" />
@@ -501,6 +513,7 @@
         </div>
     </template>
 
+    <script src="lib/pinyin-match.js"></script>
     <script src="consts.js"></script>
     <script src="common.js"></script>
     <script src="env.js"></script>

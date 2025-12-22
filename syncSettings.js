@@ -225,6 +225,11 @@ class BaseSyncService {
 class CloudSyncService extends BaseSyncService {
     constructor(serviceCard, configDialog) {
         super('cloud', serviceCard, configDialog);
+        
+        // 如果云同步功能被禁用，不进行初始化
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return;
+        }
 
         // 登录状态元素
         this.loginStatus = this.serviceCard.querySelector('.login-status');
@@ -269,6 +274,9 @@ class CloudSyncService extends BaseSyncService {
      * 检查用户登录状态并更新UI
      */
     async checkLoginStatus() {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC || !FEATURE_FLAGS.ENABLE_LOGIN) {
+            return;
+        }
         try {
             const {valid, user} = await validateToken();
 
@@ -375,6 +383,12 @@ class CloudSyncService extends BaseSyncService {
     }
 
     async validateConfig(config) {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            return {
+                valid: false,
+                error: '云同步功能已禁用'
+            };
+        }
         // 云同步需要登录才能使用
         const {valid, user} = await validateToken();
 
@@ -392,6 +406,9 @@ class CloudSyncService extends BaseSyncService {
      * 执行同步
      */
     async syncNow(config) {
+        if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            throw new Error('云同步功能已禁用');
+        }
         try {
             // 向background脚本发送执行云同步的消息
             return new Promise((resolve, reject) => {

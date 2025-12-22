@@ -155,6 +155,9 @@ class OverviewSettingsTab extends BaseSettingsTab {
     }
 
     async checkLoginStatus() {
+        if (!FEATURE_FLAGS.ENABLE_LOGIN) {
+            return;
+        }
         logger.debug('开始检查登录状态', Date.now()/1000);
         const {valid, user} = await validateToken();
         if (!valid) {
@@ -200,6 +203,12 @@ class OverviewSettingsTab extends BaseSettingsTab {
             
             // 可以存储引用以便后续使用
             this.loginWindow = loginWindow;
+        });
+
+        const syncLink = content.querySelector('.sync-link');
+        syncLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.settingsUI.switchSection('sync');
         });
         
         // 清空并添加新内容
@@ -1553,7 +1562,9 @@ class FilterSettingsTab extends BaseSettingsTab {
                     this.addGroup(item);
                 } else {
                     // 创建单个条件
-                    this.addCondition(item);
+                    if (this.validateCondition(item)) {
+                        this.addCondition(item);
+                    }
                 }
             });
         } else {
@@ -1594,6 +1605,7 @@ class FilterSettingsTab extends BaseSettingsTab {
         this.setupConditionItemDragAndDrop(condition, this.conditionsList);
     }
 
+
     addCondition(condition = null) {
         const conditionsList = document.getElementById('conditions-list');
         const conditionItem = document.createElement('div');
@@ -1601,27 +1613,7 @@ class FilterSettingsTab extends BaseSettingsTab {
         conditionItem.dataset.id = this.generateUUID();
         
         // 定义可用的字段和操作符
-        const fields = [
-            { value: 'title', label: '标题', isNumber: false},
-            { value: 'domain', label: '域名', isNumber: false },
-            { value: 'url', label: '链接', isNumber: false },
-            { value: 'tag', label: '标签', isNumber: false },
-            { value: 'create', label: '创建时间', isNumber: true, unit: '天' },
-            { value: 'lastUse', label: '上次使用', isNumber: true, unit: '天' },
-            { value: 'use', label: '使用次数', isNumber: true, unit: '次' }
-        ];
-        
-        const operators = {
-            text: [
-                { value: 'is', label: '等于' },
-                { value: 'has', label: '包含' }
-            ],
-            number: [
-                { value: '>', label: '大于' },
-                { value: '<', label: '小于' },
-                { value: '=', label: '等于' }
-            ]
-        };
+        const fields = CustomFilterConditions.getFields();
         
         // 创建字段选择器
         const fieldSelect = document.createElement('select');
@@ -1642,11 +1634,11 @@ class FilterSettingsTab extends BaseSettingsTab {
         valueContainer.className = 'condition-value';
         
         // 更新操作符和值输入框
-
         const onFieldChange = () => {
             const field = fieldSelect.value;
-            const isNumber = fields.find(f => f.value === field)?.isNumber;
-            const ops = isNumber ? operators.number : operators.text;
+            const fieldSettings = CustomFilterConditions.getFieldSettings(field);
+            const operatorGroup = fieldSettings?.operatorGroup;
+            const ops = CustomFilterConditions.getOperators(operatorGroup);
             operatorSelect.innerHTML = '';
             ops.forEach(op => {
                 const option = document.createElement('option');
@@ -1662,19 +1654,24 @@ class FilterSettingsTab extends BaseSettingsTab {
 
         const updateValueInput = () => {
             const field = fieldSelect.value;
-            const fieldSettings = fields.find(f => f.value === field);
+            const fieldSettings = CustomFilterConditions.getFieldSettings(field);
             const isNumber = fieldSettings?.isNumber;
+            const operatorGroup = fieldSettings?.operatorGroup;
+            const operator = operatorSelect.value;
+            const operatorSetting = CustomFilterConditions.getOperatorSetting(operatorGroup, operator);
+            const isArray = operatorSetting?.isArray;
             // 更新值输入框
             valueContainer.innerHTML = '';
-            if (!isNumber && operatorSelect.value === 'has') {
+            if (isArray) {
                 this.createTagsInput(valueContainer);
             } else {
                 const inputWrapper = document.createElement('div');
                 inputWrapper.className = 'input-wrapper';
                 
-                const input = document.createElement('input');
+                const input = this.createInputElement();
                 input.type = isNumber ? 'number' : 'text';
                 input.className = 'condition-value-input';
+                
                 // 为数字类型添加限制
                 if (isNumber) {
                     input.min = '1';  // 设置最小值为1
@@ -1734,7 +1731,7 @@ class FilterSettingsTab extends BaseSettingsTab {
             
             const tagsInput = valueContainer.querySelector('.tags-input-container');
             if (tagsInput) {
-                const values = Array.isArray(condition.value) ? condition.value : [condition.value];
+                const values = CustomFilterConditions.getConditionArrayValue(condition);
                 values.forEach(value => this.addTag(tagsInput, value));
                 if (values.length > 0) {
                     tagsInput.querySelector('.tags-input').placeholder = '';
@@ -1755,14 +1752,14 @@ class FilterSettingsTab extends BaseSettingsTab {
         const tagsContainer = document.createElement('div');
         tagsContainer.className = 'tags-input-container';
         
-        const input = document.createElement('input');
+        const input = this.createInputElement();
         input.className = 'tags-input';
-        input.placeholder = '可输入多个并列的关键词';
+        input.placeholder = '输入关键词按回车键添加';
         
         // 更新placeholder的显示
         const updatePlaceholder = () => {
             const tags = tagsContainer.querySelectorAll('.tag-item');
-            input.placeholder = tags.length > 0 ? '' : '可输入多个并列的关键词';
+            input.placeholder = tags.length > 0 ? '' : '输入关键词按回车键添加';
         };
         
         input.addEventListener('keypress', (e) => {
@@ -1773,9 +1770,45 @@ class FilterSettingsTab extends BaseSettingsTab {
                 updatePlaceholder();
             }
         });
+
+        input.addEventListener('blur', () => {
+            if (input.value.trim()) {
+                this.addTag(tagsContainer, input.value.trim());
+                input.value = '';
+                updatePlaceholder();
+            }
+        });
         
         tagsContainer.appendChild(input);
         container.appendChild(tagsContainer);
+    }
+
+    createInputElement() {
+        const input = document.createElement('input');
+        // 为输入框添加鼠标事件，禁用拖拽
+        input.addEventListener('mouseenter', () => {
+            const conditionItem = input.closest('.condition-item');
+            if (conditionItem) {
+                conditionItem.setAttribute('draggable', false);
+                // 找到所在的group
+                const group = conditionItem.closest('.condition-group');
+                if (group) {
+                    group.setAttribute('draggable', false);
+                }
+            }
+        });
+        input.addEventListener('mouseleave', () => {
+            const conditionItem = input.closest('.condition-item');
+            if (conditionItem) {
+                conditionItem.setAttribute('draggable', true);
+                // 找到所在的group
+                const group = conditionItem.closest('.condition-group');
+                if (group) {
+                    group.setAttribute('draggable', true);
+                }
+            }
+        });
+        return input;
     }
 
     addTag(container, text) {
@@ -1798,7 +1831,7 @@ class FilterSettingsTab extends BaseSettingsTab {
             // 更新placeholder
             const input = container.querySelector('.tags-input');
             const tags = container.querySelectorAll('.tag-item');
-            input.placeholder = tags.length > 0 ? '' : '可输入多个并列的关键词';
+            input.placeholder = tags.length > 0 ? '' : '输入关键词按回车键添加';
         });
         
         container.insertBefore(tag, container.querySelector('.tags-input'));
@@ -1888,25 +1921,7 @@ class FilterSettingsTab extends BaseSettingsTab {
 
     // 验证条件是否完整
     validateCondition(condition) {
-        // 检查值是否为空
-        if (condition.value === '' || condition.value === null || condition.value === undefined) {
-            return false;
-        }
-        
-        // 如果是数组（标签），检查是否为空数组
-        if (Array.isArray(condition.value) && condition.value.length === 0) {
-            return false;
-        }
-        
-        // 如果是数字类型，检查是否为有效数字
-        if (['create', 'use'].includes(condition.field)) {
-            const num = parseInt(condition.value);
-            if (isNaN(num) || num < 1) {
-                return false;
-            }
-        }
-        
-        return true;
+        return CustomFilterConditions.validateCondition(condition);
     }
 
     async loadFiltersList() {
@@ -2061,7 +2076,9 @@ class FilterSettingsTab extends BaseSettingsTab {
         
         const operator = {
             is: '为',
+            isNot: '不为',
             has: '包含',
+            notHas: '不包含',
             '>': '大于',
             '<': '小于',
             '=': '等于'
@@ -2312,8 +2329,10 @@ class FilterSettingsTab extends BaseSettingsTab {
         // 添加条件到分组
         const groupConditions = group.querySelector('.group-conditions');
         conditions.forEach(condition => {
-            const conditionItem = this.addCondition(condition);
-            groupConditions.appendChild(conditionItem);
+            if (this.validateCondition(condition)) {
+                const conditionItem = this.addCondition(condition);
+                groupConditions.appendChild(conditionItem);
+            }
         });
         
         // 绑定删除分组事件
@@ -2344,21 +2363,28 @@ class FilterSettingsTab extends BaseSettingsTab {
     getConditionData(item) {
         const field = item.querySelector('.condition-select').value;
         const operator = item.querySelector('.condition-operator').value;
-        let value;
+        let value, arrayValue;
         
         const tagsInput = item.querySelector('.tags-input-container');
         if (tagsInput) {
             const tags = Array.from(tagsInput.querySelectorAll('.tag-item span:first-child'))
                 .map(span => span.textContent);
-            value = tags.length === 1 ? tags[0] : tags;
+            const inputFiled = tagsInput.querySelector('.tags-input');
+            if (inputFiled.value.trim()) {
+                tags.push(inputFiled.value.trim());
+            }
+            value = tags.length > 0 ? tags[0] : null;
+            arrayValue = tags;
         } else {
             value = item.querySelector('.condition-value-input').value;
-            if (field === 'create' || field === 'use') {
+            const fieldSettings = CustomFilterConditions.getFieldSettings(field);
+            const isNumber = fieldSettings?.isNumber;
+            if (isNumber) {
                 value = parseInt(value);
             }
         }
         
-        return { field, operator, value };
+        return { field, operator, value, arrayValue };
     }
 
     // 生成UUID
@@ -2891,9 +2917,9 @@ class ImportExportSettingsTab extends BaseSettingsTab {
                 tags: finalTags,
                 excerpt: '',
                 embedding: embedding,
-                savedAt: new Date(bookmark.dateAdded).toISOString(),
+                savedAt: getDateTimestamp(bookmark.dateAdded),
                 useCount: 0,
-                lastUsed: new Date(bookmark.dateLastUsed || 0).toISOString(),
+                lastUsed: getDateTimestamp(bookmark.dateLastUsed),
                 apiService: apiService.id,
                 embedModel: apiService.embedModel,
             };
@@ -2974,7 +3000,7 @@ class ImportExportSettingsTab extends BaseSettingsTab {
             
             statusEl.innerHTML = `
                 <div class="progress-info">
-                    <div>已导入: ${this.importStats.imported}/${total}</div>
+                    <div>成功导入: ${this.importStats.imported}</div>
                     <div>已用时: ${Math.floor(elapsedTime / 60)}分${elapsedTime % 60}秒</div>
                     <div>预计剩余: ${estimatedTime}</div>
                 </div>
@@ -2986,7 +3012,7 @@ class ImportExportSettingsTab extends BaseSettingsTab {
         }
         
         progressFill.style.width = `${percentage}%`;
-        progressCount.textContent = `${current}/${total}`;
+        progressCount.textContent = `进度: ${current}/${total}`;
         progressPercentage.textContent = `${percentage}%`;
     }
 
@@ -3039,24 +3065,34 @@ class SyncSettingsTab extends BaseSettingsTab {
         this.webdavDialog = document.getElementById('webdav-config-dialog');
         this.webdavService = new WebDAVSyncService(this.webdavSyncCard, this.webdavDialog);
         
-        // 云同步服务
-        this.cloudSyncCard = document.getElementById('cloud-sync-card');
-        this.cloudDialog = document.getElementById('cloud-config-dialog');
-        this.cloudService = new CloudSyncService(this.cloudSyncCard, this.cloudDialog);
+        // 云同步服务 - 仅在功能启用时初始化
+        if (FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            this.cloudSyncCard = document.getElementById('cloud-sync-card');
+            this.cloudDialog = document.getElementById('cloud-config-dialog');
+            this.cloudService = new CloudSyncService(this.cloudSyncCard, this.cloudDialog);
+        } else {
+            this.cloudService = null;
+        }
     }
 
     async initialize() {
         await this.webdavService.initialize();
-        await this.cloudService.initialize();
+        if (FEATURE_FLAGS.ENABLE_CLOUD_SYNC && this.cloudService) {
+            await this.cloudService.initialize();
+        }
     }
     
     handleEscKey(e) {
         this.webdavService.hideConfigDialog();
-        this.cloudService.hideConfigDialog();
+        if (FEATURE_FLAGS.ENABLE_CLOUD_SYNC && this.cloudService) {
+            this.cloudService.hideConfigDialog();
+        }
     }
 
     checkLoginStatus() {
-        this.cloudService.checkLoginStatus();
+        if (FEATURE_FLAGS.ENABLE_CLOUD_SYNC && this.cloudService) {
+            this.cloudService.checkLoginStatus();
+        }
     }
 
     cleanup() {
@@ -3122,6 +3158,8 @@ class SettingsUI {
         this.setupStorageListener();
     }
 
+    hide
+
     setupStorageListener() {
         chrome.storage.onChanged.addListener((changes, areaName) => {
             if (areaName === 'local') {
@@ -3185,6 +3223,9 @@ class SettingsUI {
     }
 
     checkLoginStatus() {
+        if (!FEATURE_FLAGS.ENABLE_LOGIN) {
+            return;
+        }
         Object.values(this.tabs).forEach(tab => {
             if (tab.checkLoginStatus) {
                 tab.checkLoginStatus();
@@ -3201,24 +3242,21 @@ class SettingsUI {
         if (privacyLink) {
             privacyLink.addEventListener('click', (e) => {
                 e.preventDefault();
-                
-                // 获取用户浏览器语言
-                const userLang = navigator.language || navigator.userLanguage;
-                const isZH = userLang.toLowerCase().includes('zh');
-                
-                // 构建URL
-                const baseUrl = `${SERVER_URL}/privacy`;
-                const url = isZH ? baseUrl : `${baseUrl}?lang=en`;
-                
-                // 在新标签页中打开
-                window.open(url, '_blank');
+
+                 // 获取用户浏览器语言
+                 const userLang = navigator.language || navigator.userLanguage;
+                 const isZH = userLang.toLowerCase().includes('zh');
+
+                 const baseUrl = `https://howoii.github.io/smartbookmark-privacy`;
+                 const url = isZH ? `${baseUrl}/privacy-zh.html` : `${baseUrl}/index.html`;
+                 window.open(url, '_blank');
             });
         }
         const changelogLink = document.getElementById('changelog-link');
         if (changelogLink) {
             changelogLink.addEventListener('click', (e) => {
                 e.preventDefault();
-                window.open(`${SERVER_URL}/changelog`, '_blank');
+                window.open(`https://howoii.github.io/smartbookmark-support/changelog.html`, '_blank');
             });
         }
         const feedbackLink = document.getElementById('feedback-link');
@@ -3229,14 +3267,39 @@ class SettingsUI {
             });
         }
     }
+
+    // 根据特性开关隐藏相关UI元素
+    toggleOptionalFeatures() {
+        // 隐藏登录相关UI
+        if (FEATURE_FLAGS.ENABLE_LOGIN) {
+            const loginStatusCard = document.getElementById('login-status-card');
+            if (loginStatusCard) {
+                loginStatusCard.classList.remove('disabled');
+            }
+        }
+        
+        // 隐藏云同步相关UI
+        if (FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
+            const cloudSyncCard = document.getElementById('cloud-sync-card');
+            if (cloudSyncCard) {
+                cloudSyncCard.classList.remove('disabled');
+            }
+            const cloudConfigDialog = document.getElementById('cloud-config-dialog');
+            if (cloudConfigDialog) {
+                cloudConfigDialog.classList.remove('disabled');
+            }
+        }
+    }
 }
 
 // 在页面加载完成后调用此函数
 document.addEventListener('DOMContentLoaded', async () => {
     logger.debug('开始初始化页面', Date.now()/1000);
-    await customFilter.init();
     const settingsUI = new SettingsUI();
     window.settingsUI = settingsUI;
+    settingsUI.toggleOptionalFeatures();
+
+    await customFilter.init();
     await settingsUI.initialize();
     await Promise.all([
         LocalStorageMgr.setupListener(),
