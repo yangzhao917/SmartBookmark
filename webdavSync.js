@@ -166,10 +166,9 @@ class WebDAVSyncManager {
 
     /**
      * 获取本地书签数据
-     * @param {boolean} syncEmbeddings - 是否同步嵌入向量
      * @returns {Promise<Object>} 本地书签数据
      */
-    async getLocalBookmarksData(syncEmbeddings=true) {
+    async getLocalBookmarksData() {
         const localData = {
             version: chrome.runtime.getManifest().version,
             createAt: new Date().toISOString(),
@@ -180,15 +179,13 @@ class WebDAVSyncManager {
             // 获取书签数据
             if (this.syncConfig.syncData.bookmarks) {
                 localData.data.bookmarks = await LocalStorageMgr.getBookmarksList();
-                if (!syncEmbeddings) {
-                    // 不同步书签的向量数据
-                    localData.data.bookmarks = localData.data.bookmarks.map(bookmark => {
-                        return {
-                            ...bookmark,
-                            embedding: null
-                        };
-                    });
-                }
+                // 不同步书签的向量数据，避免同步大体积数据
+                localData.data.bookmarks = localData.data.bookmarks.map(bookmark => {
+                    return {
+                        ...bookmark,
+                        embedding: null
+                    };
+                });
             }
             
             return localData;
@@ -439,15 +436,15 @@ class WebDAVSyncManager {
             if (overwrite) {
                 if (diffResult.added.length > 0 || diffResult.updated.length > 0) {
                     const bookmarks = diffResult.added.concat(diffResult.updated);
-                    await LocalStorageMgr.setBookmarks(bookmarks);
+                    await LocalStorageMgr.setBookmarks(bookmarks, { noSync: true });
                 }
                 if (diffResult.removed.length > 0) {
-                    await LocalStorageMgr.removeBookmarks(diffResult.removed);
+                    await LocalStorageMgr.removeBookmarks(diffResult.removed, { noSync: true });
                 }
             } else {
                 const bookmarks = diffResult.added.concat(diffResult.updated);
                 if (bookmarks.length > 0) {
-                    await LocalStorageMgr.setBookmarks(bookmarks);
+                    await LocalStorageMgr.setBookmarks(bookmarks, { noSync: true });
                 }
             }
 
@@ -511,7 +508,7 @@ class WebDAVSyncManager {
      * 一个理想的操作流程：客户端1本地修改->推送同步->客户端2下拉同步->覆盖本地数据->客户端2本地修改->推送同步...
      * 
      * 冲突处理策略：
-     * 主要用于解决非并发操作时导致的数据冲突，我们假设这种情况比较少见，所以冲突处理策略比较简单
+     * 主要用于解决并发操作时导致的数据冲突，我们假设这种情况比较少见，所以冲突处理策略比较简单
      * 分为三种策略，可以配置：
      * 1. 本地优先：本地数据优先，远程数据覆盖本地数据
      * 2. 远程优先：远程数据优先，本地数据覆盖远程数据
@@ -577,7 +574,7 @@ class WebDAVSyncManager {
     async syncFullData(remoteMetadata, syncStrategy) {
         try {
             // 获取本地书签数据
-            const localBookmarksData = await this.getLocalBookmarksData(syncStrategy.syncEmbeddings);
+            const localBookmarksData = await this.getLocalBookmarksData();
             // 获取本地配置数据
             const localConfigData = await this.getLocalConfigData();
             
@@ -624,7 +621,7 @@ class WebDAVSyncManager {
     async syncBookmarks(remoteMetadata, syncStrategy) {
         try {
             // 获取本地书签数据
-            const localBookmarksData = await this.getLocalBookmarksData(syncStrategy.syncEmbeddings);
+            const localBookmarksData = await this.getLocalBookmarksData();
             
             // 计算本地书签数据的元数据
             const localMetadata = await this.calculateBookmarksMetadata(localBookmarksData);
@@ -708,7 +705,7 @@ class WebDAVSyncManager {
                     await this.importBookmarks(remoteData.data.bookmarks, false);
     
                     // 重新获取本地书签数据和元数据
-                    const updatedLocalData = await this.getLocalBookmarksData(syncStrategy.syncEmbeddings);
+                    const updatedLocalData = await this.getLocalBookmarksData();
                     const updatedLocalMetadata = await this.calculateBookmarksMetadata(updatedLocalData);
     
                     // 更新远程书签元数据
@@ -994,7 +991,10 @@ class WebDAVSyncManager {
             const remoteBookmark = remoteBookmarksMap.get(bookmark.url);
             if (remoteBookmark) {
                 if (this.isBookmarkChanged(bookmark, remoteBookmark)) {
-                    if (!remoteBookmark.embedding) {
+                    // 检查是否要保留本地的向量数据（如果embeddingText没有变化，则保留本地的向量数据）
+                    const localEmbeddingText = makeEmbeddingText(bookmark);
+                    const remoteEmbeddingText = makeEmbeddingText(remoteBookmark);
+                    if (localEmbeddingText === remoteEmbeddingText) {
                         remoteBookmark.embedding = bookmark.embedding;
                     }
                     diffResult.updated.push(remoteBookmark);

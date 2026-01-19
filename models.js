@@ -54,3 +54,21 @@ class UnifiedBookmark {
         }
     }
 }
+
+
+function unifiedBookmarkToLocalFormat(bookmark) {
+    const localBookmark = {
+        url: bookmark.url,
+        title: bookmark.title,
+        tags: bookmark.tags,
+        excerpt: bookmark.excerpt,
+        embedding: bookmark.embedding,
+        savedAt: bookmark.savedAt,
+        useCount: bookmark.useCount,
+        lastUsed: bookmark.lastUsed,
+        apiService: bookmark.apiService,
+        embedModel: bookmark.embedModel,
+    };
+    logger.debug('将书签转换为本地格式', { bookmark: bookmark, localBookmark: localBookmark });
+    return localBookmark;
+}

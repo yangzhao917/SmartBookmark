@@ -325,7 +325,6 @@ class BookmarkEditManager {
 
                     if (userBookmarksToDelete.length > 0) {
                         await LocalStorageMgr.removeBookmarks(userBookmarksToDelete);
-                        await recordBookmarkChange(userBookmarks, true, true);
                     }
 
                     if (chromeBookmarksToDelete.length > 0) {

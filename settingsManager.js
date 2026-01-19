@@ -10,7 +10,7 @@ class SettingsManager {
         display: {
             showChromeBookmarks: false,  // 控制是否显示Chrome书签的设置
             autoFocusSearch: false,  // 打开时自动聚焦搜索框
-            confirmTags: true,       // 保存时确认标签，默认开启
+            confirmTags: true,       // 保存时确认标签，默认开启 （已废弃）
             skipApiKeyNotice: false,   // 跳过API Key检查提示，默认关闭
             viewMode: 'list', // 添加默认视图模式
             openInNewTab: true, // 默认在新标签页打开书签

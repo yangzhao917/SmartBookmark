@@ -40,7 +40,7 @@ async function updatePageState() {
 async function initializeExtension() {
     try {
         await Promise.all([
-            LocalStorageMgr.setupListener(),
+            LocalStorageMgr.init(),
             SettingsManager.init(),
             SyncSettingsManager.init(),
         ]);
@@ -88,11 +88,11 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 // 监听来自插件内部的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     logger.debug("background 收到消息", {
-        message: message,
+        message: message, // message 格式为 { type: MessageType, data: any }
         sender: sender,
     });
 
-    if (message.type === MessageType.SYNC_BOOKMARK_CHANGE) {
+    if (message.type === MessageType.SYNC_BOOKMARK_CHANGE) { // 废弃, 云同步功能已废弃
         syncManager.recordBookmarkChange(message.data.bookmarks, message.data.isDeleted)
             .then(() => sendResponse({ success: true }))
             .catch(error => {
@@ -104,6 +104,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // 执行WebDAV同步
         AutoSyncManager.executeWebDAVSync()
             .then(result => {
+                logger.debug('发送WebDAV同步结果:', result);
                 sendResponse({ success: result.success, result: result.result, error: result.error });
             })
             .catch(error => {
@@ -115,7 +116,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // 检查云同步功能是否启用
         if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
             sendResponse({ success: false, error: '云同步功能已禁用' });
-            return;
+            return false; // 同步调用 sendResponse，不需要返回 true
         }
         // 执行云同步
         AutoSyncManager.executeCloudSync()
@@ -126,7 +127,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 logger.error('云同步失败:', error);
                 sendResponse({ success: false, error: error.message });
             });
-
         return true;
     } else if (message.type === MessageType.SCHEDULE_SYNC) {
         // 预定同步请求，由数据变更触发
@@ -149,9 +149,63 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 sendResponse({ success: false, error: error.message });
             });
         return true;
-    } else if (message.type === MessageType.TRIGGER_BOOKMARK_CACHE_UPDATE) {
-        // 触发书签缓存更新
-        LocalStorageMgr.scheduleBookmarkCacheUpdate();
+    } else if (message.type === MessageType.SEARCH_BOOKMARKS) {
+        searchManager.search(message.data.query, message.data.options).then(results => {
+            sendResponse({ success: true, results: results });
+        }).catch(error => {
+            logger.error('搜索书签失败:', error);
+            sendResponse({ success: false, error: error.message });
+        });
+        return true;
+    } else if (message.type === MessageType.GET_FULL_BOOKMARKS) {
+        LocalStorageMgr.getBookmarks()
+            .then(bookmarks => {
+                sendResponse({ success: true, bookmarks: bookmarks });
+            })
+            .catch(error => {
+                logger.error('获取书签失败:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    } else if (message.type === MessageType.SET_BOOKMARKS) {
+        LocalStorageMgr.setBookmarks(message.data.bookmarks, message.data.options)
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch(error => {
+                logger.error('更新书签失败:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    } else if (message.type === MessageType.REMOVE_BOOKMARKS) {
+        LocalStorageMgr.removeBookmarks(message.data.urls, message.data.options)
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch(error => {
+                logger.error('删除书签失败:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    } else if (message.type === MessageType.CLEAR_BOOKMARKS) {
+        LocalStorageMgr.clearBookmarks(message.data.options)
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch(error => {
+                logger.error('清除书签失败:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    } else if (message.type === MessageType.UPDATE_BOOKMARKS_AND_EMBEDDING) {
+        LocalStorageMgr.updateBookmarksAndEmbedding(message.data.bookmarks, message.data.options)
+            .then(() => {
+                sendResponse({ success: true });
+            })
+            .catch(error => {
+                logger.error('更新书签和向量失败:', error);
+                sendResponse({ success: false, error: error.message });
+            });
         return true;
     }
 });

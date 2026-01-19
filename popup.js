@@ -432,6 +432,7 @@ class SyncStatusDialog {
                     // 执行云同步
                     result = await this.executeCloudSync();
                 }
+                logger.debug('同步结果:', result);
                 
                 // 显示同步结果
                 if (result && result.success) {
@@ -524,7 +525,7 @@ class BookmarkManager {
                 tagsList: document.getElementById('tags-list'),
                 apiKeyNotice: document.getElementById('api-key-notice'),
                 syncButton: document.getElementById('sync-button'),
-                regenerateEmbeddings: document.getElementById('regenerate-embeddings'),
+                regeneratingStatus: document.getElementById('regenerating-embeddings-status'),
                 privacyIcon: document.getElementById('privacy-mode')
             },
             optional: {
@@ -566,7 +567,7 @@ class BookmarkManager {
             this.isInitialized = true;
             // 绑定核心事件处理器
             await Promise.all([
-                this.checkEmbeddingStatus(),
+                this.updateRegeneratingStatus(),
                 this.checkApiKeyConfig(true),
                 this.updateSyncButtonState()
             ]);
@@ -624,7 +625,6 @@ class BookmarkManager {
     bindEvents() {
         this.elements.required.saveButton.addEventListener('click', this.handleSaveClick.bind(this));
         this.elements.required.syncButton.addEventListener('click', this.handleSyncClick.bind(this));
-        this.elements.required.regenerateEmbeddings.addEventListener('click', this.handleRegenerateEmbeddingsClick.bind(this));
         this.elements.required.privacyIcon.addEventListener('click', this.handlePrivacyIconClick.bind(this));
         this.setupTagsDialogEvents();
         this.setupStorageListener();
@@ -1020,106 +1020,40 @@ class BookmarkManager {
         }
     }
 
-    async checkEmbeddingStatus() {
+    // 更新重新生成索引状态显示
+    async updateRegeneratingStatus() {
         try {
-            const activeService = await ConfigManager.getEmbeddingService();
-            if (!activeService.apiKey || !activeService.embedModel) {
-                this.elements.required.regenerateEmbeddings.style.display = 'none';
+            const statusData = await LocalStorageMgr.get('isRegeneratingEmbeddings');
+            const statusElement = this.elements.required.regeneratingStatus;
+            
+            if (!statusElement) {
                 return;
             }
-
-            const bookmarks = await LocalStorageMgr.getBookmarks();
-            const needsUpdate = Object.values(bookmarks).some(bookmark => 
-                ConfigManager.isNeedUpdateEmbedding(bookmark, activeService)
-            );
-
-            const regenerateButton = this.elements.required.regenerateEmbeddings;
-            if (needsUpdate) {
-                const count = Object.values(bookmarks).filter(bookmark => 
-                    ConfigManager.isNeedUpdateEmbedding(bookmark, activeService)
-                ).length;
-                regenerateButton.title = `检测到 ${count} 个书签的索引向量已失效，需要更新`;
-            }
-
-            const isApiKeyValid = await checkAPIKeyValidSafe();
-            regenerateButton.style.display = needsUpdate && isApiKeyValid ? 'flex' : 'none';
-        } catch (error) {
-            logger.error('检查embedding状态时出错:', error);
-        }
-    }
-
-    async handleRegenerateEmbeddingsClick() {
-        this.alertDialog.show({
-            title: '确认重新生成',
-            message: '这将重新生成所有使用旧API服务生成的向量，该过程可能需要一些时间。是否继续？',
-            primaryText: '继续',
-            secondaryText: '取消',
-            onPrimary: async () => {
-                await this.regenerateEmbeddings();
-            }
-        });
-    }
-
-    async regenerateEmbeddings() {
-        const regenerateButton = this.elements.required.regenerateEmbeddings;
-        try {
-            regenerateButton.classList.add('processing');
-
-            const activeService = await ConfigManager.getEmbeddingService();
-            const bookmarks = await LocalStorageMgr.getBookmarks();
-            const needUpdateCount = Object.values(bookmarks).filter(bookmark => 
-                ConfigManager.isNeedUpdateEmbedding(bookmark, activeService)
-            ).length;
-            let updatedCount = 0;
             
-            const BATCH_SIZE = 10; // 每批处理的书签数量
-            let batchBookmarks = [];
-            
-            for (const [key, bookmark] of Object.entries(bookmarks)) {
-                if (ConfigManager.isNeedUpdateEmbedding(bookmark, activeService)) {
-                    StatusManager.startOperation(`正在更新 ${++updatedCount}/${needUpdateCount} 个书签...`);
-                    
-                    const text = makeEmbeddingText({
-                        excerpt: bookmark.excerpt,
-                        title: bookmark.title,
-                        url: bookmark.url
-                    }, null, bookmark.tags);
-                    
-                    const newEmbedding = await getEmbedding(text);
-                    if (!newEmbedding) {
-                        throw new Error('向量生成失败');
-                    }
-                    
-                    const updatedBookmark = {
-                        ...bookmark,
-                        embedding: newEmbedding,
-                        apiService: activeService.id,
-                        embedModel: activeService.embedModel
-                    };
-                    
-                    // 将更新后的书签添加到批次中
-                    batchBookmarks.push(updatedBookmark);
-                    
-                    // 当达到批次大小或是最后一个书签时,执行批量更新
-                    if (batchBookmarks.length >= BATCH_SIZE || updatedCount === needUpdateCount) {
-                        // 批量更新storage
-                        LocalStorageMgr.setBookmarks(batchBookmarks);
-                        // 批量记录变更
-                        const isLast = updatedCount === needUpdateCount;
-                        await recordBookmarkChange(batchBookmarks, false, isLast, onSyncError);
-                        // 清空当前批次
-                        batchBookmarks = [];
-                    }
+            // 检查状态数据
+            let isRegenerating = false;
+            if (statusData && typeof statusData === 'object') {
+                const REGENERATING_TIMEOUT = 5 * 60 * 1000; // 5分钟超时时间（毫秒）
+                const now = Date.now();
+                const timestamp = statusData.timestamp || 0;
+                
+                // 检查是否超时
+                if (statusData.isRegenerating && (now - timestamp) > REGENERATING_TIMEOUT) {
+                    // 状态超时，自动清除
+                    logger.warn('重新生成索引状态已超时，自动清除');
+                    await LocalStorageMgr.set('isRegeneratingEmbeddings', {
+                        isRegenerating: false,
+                        timestamp: now
+                    });
+                    isRegenerating = false;
+                } else {
+                    isRegenerating = statusData.isRegenerating || false;
                 }
             }
-
-            StatusManager.endOperation(`成功更新 ${updatedCount} 个书签的向量`);
-            regenerateButton.style.display = 'none';
+            
+            statusElement.style.display = isRegenerating ? 'flex' : 'none';
         } catch (error) {
-            logger.error('重新生成embedding时出错:', error);
-            StatusManager.endOperation('更新向量失败', true);
-        } finally {
-            regenerateButton.classList.remove('processing');
+            logger.error('更新重新生成索引状态时出错:', error);
         }
     }
 
@@ -1130,16 +1064,18 @@ class BookmarkManager {
                 if (changes[ConfigManager.STORAGE_KEYS.SERVICE_TYPES]) {
                     logger.debug('API Keys发生变化:', changes[ConfigManager.STORAGE_KEYS.SERVICE_TYPES], changes[ConfigManager.STORAGE_KEYS.SERVICE_TYPES]);
                     this.checkApiKeyConfig(false);
-                    this.checkEmbeddingStatus();
                 }
                 if (changes[ConfigManager.STORAGE_KEYS.API_KEYS]) {
                     this.checkApiKeyConfig(false);
                 }
                 if (changes[ConfigManager.STORAGE_KEYS.CUSTOM_SERVICES]) {
                     this.checkApiKeyConfig(false);
-                    this.checkEmbeddingStatus();
                 }
             } else if (areaName === 'local') {
+                // 监听重新生成索引状态
+                if (changes.isRegeneratingEmbeddings) {
+                    this.updateRegeneratingStatus();
+                }
                 if (changes[SyncStatusManager.SYNC_PROCESS_KEY] || changes[SyncSettingsManager.SYNC_CONFIG_KEY]) {
                     this.updateSyncButtonState();
                     this.syncStatusDialog.onSyncProcessChange();
@@ -1205,7 +1141,7 @@ class BookmarkManager {
                 const isSaved = await checkIfPageSaved(tab.url);
                 
                 if (isSaved) {
-                    const bookmark = await LocalStorageMgr.getBookmark(tab.url);
+                    const bookmark = await LocalStorageMgr.getBookmark(tab.url, true);
                     this.handleEdit(bookmark);
                     return;
                 }
@@ -1229,10 +1165,9 @@ class BookmarkManager {
     }
 
     async handleUnsave(tab) {
-        const bookmark = await LocalStorageMgr.getBookmark(tab.url);
+        const bookmark = await LocalStorageMgr.getBookmark(tab.url, true);
         if (bookmark) {
             await LocalStorageMgr.removeBookmark(tab.url);
-            await recordBookmarkChange(bookmark, true, true, onSyncError);
             updateStatus('已取消收藏');
             await refreshBookmarksInfo();
         }
@@ -1263,13 +1198,8 @@ class BookmarkManager {
             StatusManager.endOperation('标签生成完成');
         }   
 
-        // 获取确认标签设置
-        const confirmTags = await SettingsManager.get('display.confirmTags');
-        if (confirmTags) {
-            await this.showTagsDialog(this.generatedTags);
-        } else {
-            await this.saveBookmark(this.generatedTags, this.currentTab.title);
-        }
+        // 直接显示标签对话框
+        await this.showTagsDialog(this.generatedTags);
     }
 
     // 添加重置编辑模式的方法
@@ -1431,31 +1361,14 @@ class BookmarkManager {
             // 获取编辑后的 URL 和摘要
             const url = this.getEditedUrl();
             const editedExcerpt = this.getEditedExcerpt();
-            let needRegenerate = false;
-            if (this.isEditMode) {
-                needRegenerate = title !== this.editingBookmark.title || editedExcerpt !== this.editingBookmark.excerpt || JSON.stringify(tags) !== JSON.stringify(this.editingBookmark.tags);
-            } else {
-                needRegenerate = true;
-            }
-            
-            const pageContent = {
-                title: title,
-                excerpt: editedExcerpt
-            }
-            const embedding = needRegenerate ? await getEmbedding(makeEmbeddingText(pageContent, this.currentTab, tags)) : this.editingBookmark.embedding;
-            const apiService = await ConfigManager.getEmbeddingService();
-            
             const pageInfo = {
                 url: url,
                 title: title,
                 tags: tags,
                 excerpt: editedExcerpt,
-                embedding: embedding,
                 savedAt: this.isEditMode ? this.editingBookmark.savedAt : Date.now(),
                 useCount: this.isEditMode ? this.editingBookmark.useCount : 1,
                 lastUsed: this.isEditMode ? this.editingBookmark.lastUsed : Date.now(),
-                apiService: this.isEditMode ? this.editingBookmark.apiService : apiService.id,
-                embedModel: this.isEditMode ? this.editingBookmark.embedModel : apiService.embedModel,
             };
 
             // 打印书签编辑信息
@@ -1468,11 +1381,9 @@ class BookmarkManager {
             // 如果编辑模式下URL发生变化，则先删除旧书签
             if (this.isEditMode && this.editingBookmark.url !== url) {
                 await LocalStorageMgr.removeBookmark(this.editingBookmark.url);
-                await recordBookmarkChange(this.editingBookmark, true, false);
             }
                         
-            await LocalStorageMgr.setBookmark(url, pageInfo);
-            await recordBookmarkChange(pageInfo, false, true);
+            await updateBookmarksAndEmbedding(pageInfo);
 
             await refreshBookmarksInfo();
             StatusManager.endOperation(this.isEditMode ? '书签更新成功' : '书签保存成功', false);
@@ -1491,7 +1402,7 @@ async function updateSearchResults() {
         logger.debug('更新搜索结果');
         const query = searchInput.value.trim();
         const includeChromeBookmarks = await SettingsManager.get('display.showChromeBookmarks');
-        const results = await searchManager.search(query, {
+        const results = await searchBookmarksFromBackground(query, {
             debounce: false,
             includeUrl: true,
             includeChromeBookmarks: includeChromeBookmarks
@@ -1841,7 +1752,6 @@ async function deleteBookmark(bookmark) {
                 // 先删除书签
                 if (bookmark.source === BookmarkSource.EXTENSION) {
                     await LocalStorageMgr.removeBookmark(bookmark.url);
-                    await recordBookmarkChange(bookmark, true, true, onSyncError);
                 } else {
                     await chrome.bookmarks.remove(bookmark.chromeId);
                 }
@@ -1929,29 +1839,36 @@ function onSyncError(errorMessage) {
 }
 
 // 监听来自 background 的消息
-chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     logger.debug("popup 收到消息", {
         message: message,
         sender: sender,
     });
 
+    // 使用同步函数，避免 Chrome 144+ 将 async 函数视为返回 Promise
+    // 对于需要异步操作的部分，使用 async IIFE 处理
     if (message.type === MessageType.UPDATE_TAB_STATE) {
-        const [tab] = await chrome.tabs.query({ 
-            active: true, 
-            currentWindow: true 
-        });
-        if (tab) {
-            const isSaved = await checkIfPageSaved(tab.url);
-            updateSaveButtonState(isSaved);
-            await updatePrivacyIconState(tab);
-        }
+        (async () => {
+            const [tab] = await chrome.tabs.query({ 
+                active: true, 
+                currentWindow: true 
+            });
+            if (tab) {
+                const isSaved = await checkIfPageSaved(tab.url);
+                updateSaveButtonState(isSaved);
+                await updatePrivacyIconState(tab);
+            }
+        })();
     } else if (message.type === MessageType.TOGGLE_SEARCH) {
         toggleSearching();
     } else if (message.type === MessageType.BOOKMARKS_UPDATED) {
-        await refreshBookmarksInfo();
-        const bookmarkMgr = getBookmarkManager();
-        await bookmarkMgr.checkEmbeddingStatus();
+        refreshBookmarksInfo();
+    } else if (message.type === MessageType.SETTINGS_CHANGED) {
+        if (window.settingsDialog) {
+            window.settingsDialog.loadSettings();
+        }
     }
+    // 不返回任何值，让其他 listener 处理需要响应的消息
 });
 
 // 修改现有的搜索框切换功能，添加一个可复用的函数
@@ -2033,9 +1950,9 @@ function updateSaveButtonState(isSaved) {
 }
 
 // 更新收藏数量显示
-async function updateBookmarkCount(localCache = false) {
+async function updateBookmarkCount() {
     try {
-        const allBookmarks = await getDisplayedBookmarks(localCache);
+        const allBookmarks = await getDisplayedBookmarks();
         const count = Object.keys(allBookmarks).length;
         const bookmarkCount = document.getElementById('bookmark-count');
         bookmarkCount.setAttribute('data-count', count);
@@ -2049,8 +1966,8 @@ async function updateBookmarkCount(localCache = false) {
 let currentRenderer = null;
 
 // 修改渲染书签列表函数
-async function renderBookmarksList(localCache = false) {
-    logger.debug('renderBookmarksList 开始, localCache: ', localCache);
+async function renderBookmarksList() {
+    logger.debug('renderBookmarksList 开始');
     const bookmarksList = document.getElementById('bookmarks-list');
     if (!bookmarksList) return;
 
@@ -2081,8 +1998,8 @@ async function renderBookmarksList(localCache = false) {
         const sortBy = settings.sort.bookmarks;
 
         const data = viewMode === 'group'
-            ? Object.values(await getDisplayedBookmarks(localCache))
-            : await filterManager.getFilteredBookmarks(localCache);
+            ? Object.values(await getDisplayedBookmarks())
+            : await filterManager.getFilteredBookmarks();
 
         let bookmarks = data.map((item) => ({
                 ...item,
@@ -2185,10 +2102,10 @@ async function renderBookmarksList(localCache = false) {
     }
 }
 
-async function refreshBookmarksInfo(localCache = false) {
-    await renderBookmarksList(localCache);
+async function refreshBookmarksInfo() {
+    await renderBookmarksList();
     await Promise.all([
-        updateBookmarkCount(localCache),
+        updateBookmarkCount(),
         updateTabState(),
         updateSearchResults(),
     ]);
@@ -2346,7 +2263,7 @@ class BookmarkRenderer {
         li.className = 'bookmark-item';
         li.dataset.url = bookmark.url;
 
-        const editBtn = bookmark.source === BookmarkSource.EXTENSION && !bookmark.isCached
+        const editBtn = bookmark.source === BookmarkSource.EXTENSION
             ? `<button class="edit-btn" title="编辑">
                     <svg viewBox="0 0 24 24" width="16" height="16">
                         <path fill="currentColor" d="M3,17.25V21H6.75L17.81,9.93L14.06,6.18M17.5,3C19.54,3 21.43,4.05 22.39,5.79L20.11,7.29C19.82,6.53 19.19,6 18.5,6A2.5,2.5 0 0,0 16,8.5V11H18V13H16V15H18V17.17L16.83,18H13V16H15V14H13V12H15V10H13V8.83"></path>
@@ -2726,8 +2643,8 @@ class SettingsDialog {
             closeBtn: this.dialog.querySelector('.close-dialog-btn'),
             showChromeBookmarks: document.getElementById('show-chrome-bookmarks'),
             autoFocusSearch: document.getElementById('auto-focus-search'),
-            confirmTags: document.getElementById('confirm-tags'),
             openInNewTab: document.getElementById('open-in-new-tab'), // 添加新元素引用
+            themeOptions: document.querySelectorAll('.theme-option-popup'),
             autoPrivacySwitch: document.getElementById('auto-privacy-mode'),
             manualPrivacySwitch: document.getElementById('manual-privacy-mode'),
             manualPrivacyContainer: document.getElementById('manual-privacy-container'),
@@ -2774,13 +2691,18 @@ class SettingsDialog {
 
         this.elements.autoFocusSearch.addEventListener('change', async (e) =>
             await this.handleSettingChange('display.autoFocusSearch', e.target.checked));
-
-        this.elements.confirmTags.addEventListener('change', async (e) =>
-            await this.handleSettingChange('display.confirmTags', e.target.checked));
             
         // 添加打开方式设置的事件监听器
         this.elements.openInNewTab.addEventListener('change', async (e) =>
             await this.handleSettingChange('display.openInNewTab', e.target.checked));
+
+        // 主题切换事件
+        this.elements.themeOptions.forEach(option => {
+            option.addEventListener('click', async () => {
+                const theme = option.dataset.theme;
+                await this.handleThemeChange(theme);
+            });
+        });
 
         this.elements.autoPrivacySwitch.addEventListener('change', async (e) => {
             const isAutoDetect = e.target.checked;
@@ -2910,8 +2832,8 @@ class SettingsDialog {
                 display: { 
                     showChromeBookmarks, 
                     autoFocusSearch, 
-                    confirmTags,
                     openInNewTab,
+                    theme: themeSettings,
                 } = {},
                 privacy: { 
                     autoDetect: autoPrivacyMode, 
@@ -2922,11 +2844,14 @@ class SettingsDialog {
             // 初始化开关状态
             this.elements.showChromeBookmarks.checked = showChromeBookmarks;
             this.elements.autoFocusSearch.checked = autoFocusSearch;
-            this.elements.confirmTags.checked = confirmTags;
             this.elements.openInNewTab.checked = openInNewTab; // 初始化打开方式开关状态
             this.elements.autoPrivacySwitch.checked = autoPrivacyMode;
             this.elements.manualPrivacySwitch.checked = manualPrivacyMode;
             this.elements.manualPrivacyContainer.classList.toggle('show', !autoPrivacyMode);
+
+            // 初始化主题选择器
+            const currentTheme = themeSettings?.mode || 'system';
+            this.updateThemeUI(currentTheme);
 
         } catch (error) {
             logger.error('加载设置失败:', error);
@@ -2966,6 +2891,37 @@ class SettingsDialog {
 
     close() {
         this.dialog.classList.remove('show');
+    }
+
+    /**
+     * 更新主题UI状态
+     * @param {string} theme - 主题模式：'light' | 'dark' | 'system'
+     */
+    updateThemeUI(theme) {
+        this.elements.themeOptions.forEach(option => {
+            if (option.dataset.theme === theme) {
+                option.classList.add('active');
+            } else {
+                option.classList.remove('active');
+            }
+        });
+    }
+
+    /**
+     * 处理主题切换
+     * @param {string} theme - 主题模式：'light' | 'dark' | 'system'
+     */
+    async handleThemeChange(theme) {
+        try {
+            await themeManager.updateTheme({
+                mode: theme
+            });
+            this.updateThemeUI(theme);
+            // 主题切换后立即生效，不需要额外操作，themeManager 会自动应用
+        } catch (error) {
+            logger.error('更新主题失败:', error);
+            updateStatus('主题设置更新失败', true);
+        }
     }
 }
 
@@ -3063,7 +3019,7 @@ async function handleSearch() {
         `;
         
         const includeChromeBookmarks = await SettingsManager.get('display.showChromeBookmarks');
-        const results = await searchManager.search(query, {
+        const results = await searchBookmarksFromBackground(query, {
             debounce: false,
             includeUrl: true,
             includeChromeBookmarks: includeChromeBookmarks
@@ -3521,7 +3477,7 @@ async function initPopupFastPass() {
     logger.debug('initPopupFastPass 开始');
     // 初始化必需的管理器
     await Promise.all([
-        LocalStorageMgr.initLocalCache(),
+        LocalStorageMgr.init(),
         SettingsManager.init(),
         SyncSettingsManager.init(),
     ]);
@@ -3535,7 +3491,7 @@ async function initPopupFastPass() {
         initializeSearch(),
         initializeSortDropdown(),
         window.settingsDialog.initialize(),
-        refreshBookmarksInfo(true),
+        refreshBookmarksInfo(),
         initializeGlobalTooltip(),
     ]);
 
@@ -3554,13 +3510,9 @@ async function initializePopup() {
         // 先初始化一部分，减少初始化时间
         await initPopupFastPass();
 
-        // 初始化书签
-        await LocalStorageMgr.init();
-
         // 初始化UI状态 (并行执行以提高性能)
         await Promise.all([
             bookmarkManager.initialize(),
-            refreshBookmarksInfo(),
         ]);
 
         logger.info('弹出窗口初始化完成');

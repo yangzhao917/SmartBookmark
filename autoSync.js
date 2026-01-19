@@ -15,7 +15,7 @@ class AutoSyncManager {
     // 预定同步的防抖定时器和延迟时间
     static scheduledWebdavSyncDebounceTimer = null;
     static scheduledCloudSyncDebounceTimer = null;
-    static SCHEDULED_SYNC_DEBOUNCE_DELAY = 30000; // 30秒
+    static SCHEDULED_SYNC_DEBOUNCE_DELAY = 25000; // 25秒的防抖延迟
     
     // 闹钟日志相关配置
     static ALARM_LOGS_KEY = 'alarm_logs';
@@ -351,7 +351,7 @@ class AutoSyncManager {
             }
             
             const reason = data.reason || '未指定原因';
-            logger.debug(`webdav 预定同步请求 (${reason})，将在30秒后触发同步`);
+            logger.debug(`webdav 预定同步请求 (${reason})，将在25秒后触发同步`);
             
             this.scheduledWebdavSyncDebounceTimer = setTimeout(async () => {
                 try {
@@ -396,7 +396,7 @@ class AutoSyncManager {
             }
             
             const reason = data.reason || '未指定原因';
-            logger.debug(`cloud 预定同步请求 (${reason})，将在30秒后触发同步`);
+            logger.debug(`cloud 预定同步请求 (${reason})，将在25秒后触发同步`);
             
             this.scheduledCloudSyncDebounceTimer = setTimeout(async () => {
                 try {

@@ -417,7 +417,7 @@ class QuickSearchManager {
     }
 
     async getSortedBookmarks(sortBy='useCount') {
-        const data = await getDisplayedBookmarks(true);
+        const data = await getDisplayedBookmarks();
 
         let bookmarks = Object.values(data).map((item) => ({
                 ...item,
@@ -947,7 +947,7 @@ class QuickSearchManager {
             const includeChromeBookmarks = settings.display?.showChromeBookmarks || false;
 
             // 执行搜索
-            const results = await searchManager.search(query, {
+            const results = await searchBookmarksFromBackground(query, {
                 debounce: false,
                 includeUrl: true,
                 includeChromeBookmarks: includeChromeBookmarks
@@ -1214,6 +1214,7 @@ class QuickSearchManager {
         // 修改点击事件处理
         const link = resultItem.querySelector('.result-link');
         link.addEventListener('click', async (e) => {
+            e.preventDefault();
             // 非编辑模式下的正常处理
             if (isNonMarkableUrl(result.url)) {
                 e.preventDefault();
@@ -1224,18 +1225,7 @@ class QuickSearchManager {
                     updateStatus('链接已复制到剪贴板');
                 }
             } else {
-                // 获取用户的打开方式配置
-                const openInNewTab = await SettingsManager.get('display.openInNewTab');
-                
-                // 如果不是在新标签页打开，修改链接行为
-                if (!openInNewTab) {
-                    e.preventDefault();
-                    chrome.tabs.update({ url: result.url });
-                }
-                // 更新使用频率
-                if (result.source === BookmarkSource.EXTENSION) {
-                    await updateBookmarkUsage(result.url);
-                }
+                await this.openResult(result.url);
             }
         });
         
@@ -1472,10 +1462,14 @@ class QuickSearchManager {
 
             if (bookmark.source === BookmarkSource.EXTENSION) {
                 await LocalStorageMgr.removeBookmark(bookmark.url);
-                await recordBookmarkChange(bookmark, true, true);
             } else {
                 await chrome.bookmarks.remove(bookmark.chromeId);
             }
+
+            sendMessageSafely({
+                type: MessageType.BOOKMARKS_UPDATED,
+                source: 'quickSearch'
+            });
             
             // 显示成功提示
             this.showStatus('书签已删除', 'success');
@@ -1564,15 +1558,9 @@ class QuickSearchManager {
             
             // 根据书签来源执行不同的更新操作
             if (bookmark.source === BookmarkSource.EXTENSION) {
-                const data = await LocalStorageMgr.getBookmark(url, true);
-                if (data) {
-                    // 更新标题
-                    data.title = newTitle;
-                    await LocalStorageMgr.setBookmark(url, data);
-                    
-                    // 发送同步消息
-                    await recordBookmarkChange(data, false, true);
-                }
+                // 更新标题
+                bookmark.title = newTitle;
+                await updateBookmarksAndEmbedding(bookmark);
             } else if (bookmark.source === BookmarkSource.CHROME) {
                 // 更新Chrome书签
                 await chrome.bookmarks.update(bookmark.chromeId, {
@@ -1594,6 +1582,11 @@ class QuickSearchManager {
                     titleElement.title = newTitle;
                 }
             }
+
+            sendMessageSafely({
+                type: MessageType.BOOKMARKS_UPDATED,
+                source: 'quickSearch'
+            });
             
             this.showStatus('书签名称修改成功', 'success');
         } catch (error) {
@@ -1712,26 +1705,25 @@ class QuickSearchManager {
             
             // 确保只处理扩展自身的书签
             if (bookmark.source === BookmarkSource.EXTENSION) {
-                const data = await LocalStorageMgr.getBookmark(url, true);
-                if (data) {
-                    // 更新标签
-                    data.tags = this.currentTags;
-                    await LocalStorageMgr.setBookmark(url, data);
-                    
-                    // 发送同步消息
-                    await recordBookmarkChange(data, false, true);
-                    
-                    // 更新搜索结果中的标签
-                    const index = this.lastQueryResult.findIndex(item => item.url === url);
-                    if (index !== -1) {
-                        this.lastQueryResult[index].tags = this.currentTags;
-                    }
-                    
-                    // 更新UI
-                    this.updateResultItemTags(this.editingTagsResultItem, this.currentTags);
-                    
-                    this.showStatus('标签修改成功', 'success');
+                // 更新标签
+                bookmark.tags = this.currentTags;
+                await updateBookmarksAndEmbedding(bookmark);
+                
+                // 更新搜索结果中的标签
+                const index = this.lastQueryResult.findIndex(item => item.url === url);
+                if (index !== -1) {
+                    this.lastQueryResult[index].tags = this.currentTags;
                 }
+                
+                // 更新UI
+                this.updateResultItemTags(this.editingTagsResultItem, this.currentTags);
+
+                sendMessageSafely({
+                    type: MessageType.BOOKMARKS_UPDATED,
+                    source: 'quickSearch'
+                });
+                
+                this.showStatus('标签修改成功', 'success');
             }
         } catch (error) {
             logger.error('修改书签标签失败:', error);

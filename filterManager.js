@@ -342,7 +342,7 @@ class FilterManager {
         const customTagFilter = new CustomTagFilter();
         
         // 等待所有筛选器初始化完成
-        const bookmarks = await getDisplayedBookmarks(true);
+        const bookmarks = await getDisplayedBookmarks();
         const bookmarksList = Object.values(bookmarks);
         await Promise.all([
             tagFilter.init(bookmarksList),
@@ -564,9 +564,9 @@ class FilterManager {
         this.renderFilterOptions();
     }
 
-    async getFilteredBookmarks(localCache = false) {
+    async getFilteredBookmarks() {
         // 获取所有书签
-        const bookmarks = await getDisplayedBookmarks(localCache);
+        const bookmarks = await getDisplayedBookmarks();
         // 应用筛选
         let filteredBookmarks = Object.values(bookmarks);
         if (this.activeFilter) {

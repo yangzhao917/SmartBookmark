@@ -4372,30 +4372,6 @@ input[type="radio"]:checked + .radio-mark::after {
     transform: scale(0.9);
 }
 
-/* 同步书签向量强调样式 */
-.sync-strategy-label.emphasize-embedding {
-    position: relative;
-    font-weight: 600;
-    color: var(--warning-text);
-    display: inline-flex;
-    align-items: center;
-}
-
-.form-group:has(#sync-embeddings) {
-    position: relative;
-    border: 2px dashed var(--warning-border);
-    /* background-color: var(--warning-bg); */
-    border-radius: 8px;
-    padding: 12px 14px;
-    margin-bottom: 16px;
-    transition: all 0.3s ease;
-}
-
-.form-group:has(#sync-embeddings) .help-text {
-    color: var(--warning-text);
-    font-weight: 500;
-}
-
 /* 添加服务状态图标样式 */
 .service-status-icon {
     display: inline-flex;

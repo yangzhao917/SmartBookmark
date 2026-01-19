@@ -56,7 +56,7 @@ const API_SERVICES = {
             MEDIUM: 0.50,
             LOW: 0.4
         },
-        getKeyUrl: 'https://bailian.console.aliyun.com/?apiKey=1',
+        getKeyUrl: 'https://bailian.console.aliyun.com/cn-beijing/?apiKey=1&tab=model#/api-key',
         pricingUrl: 'https://help.aliyun.com/zh/model-studio/getting-started/models',
         recommendTags: ['模型丰富', '稳定', '赠送Token']
     },

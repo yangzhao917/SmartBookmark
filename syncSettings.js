@@ -461,7 +461,6 @@ class WebDAVSyncService extends BaseSyncService {
         // 同步策略
         this.autoSyncCheck = this.configDialog.querySelector('#auto-sync');
         this.mechanismInputs = this.configDialog.querySelectorAll('input[name="sync-mechanism"]');
-        this.syncEmbeddingsCheck = this.configDialog.querySelector('#sync-embeddings');
         this.intervalSlider = this.configDialog.querySelector('#sync-interval');
         this.intervalDisplay = this.configDialog.querySelector('#interval-display');
 
@@ -544,7 +543,6 @@ class WebDAVSyncService extends BaseSyncService {
         // 同步策略
         this.autoSyncCheck.checked = config.syncStrategy.autoSync;
         this.intervalSlider.disabled = !this.autoSyncCheck.checked;
-        this.syncEmbeddingsCheck.checked = config.syncStrategy.syncEmbeddings;
 
         // 初始化滑动条
         const intervalInMinutes = config.syncStrategy.interval || 30;
@@ -658,7 +656,6 @@ class WebDAVSyncService extends BaseSyncService {
                 autoSync: this.autoSyncCheck.checked,
                 interval: this.intervals[sliderValue],
                 mechanism: this.configDialog.querySelector('input[name="sync-mechanism"]:checked').value,
-                syncEmbeddings: this.syncEmbeddingsCheck.checked
             }
         };
     }
@@ -729,7 +726,7 @@ class WebDAVSyncService extends BaseSyncService {
                         return;
                     }
                     
-                    if (response.success) {
+                    if (response && response.success) {
                         resolve(response.result);
                     } else {
                         reject(new Error(response.error || '同步失败'));

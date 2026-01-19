@@ -5,18 +5,18 @@ function joinUrl(baseUrl, path) {
     return baseUrl + '/' + path;
 }
 
-function makeEmbeddingText(pageContent, tab, tags) {
-    let text = "";
-    if (pageContent && pageContent.title) {
-        text += pageContent.title ? `title: ${pageContent.title};` : '';
-        text += tags.length > 0 ? `tags: ${tags.join(',')};` : '';
-        text += pageContent.excerpt ? `excerpt: ${smartTruncate(pageContent.excerpt, 200)};` : '';
-    } else {
-        const cleanUrl = tab.url.replace(/\?.+$/, '').replace(/[#&].*$/, '').replace(/\/+$/, '');
-        text += `title: ${tab.title};`;
-        text += tags.length > 0 ? `tags: ${tags.join(',')};` : '';
-        text += `url: ${cleanUrl};`;
+function makeEmbeddingText(bookmarkInfo) {
+    if (!bookmarkInfo) {
+        return '';
     }
+    let title = bookmarkInfo.title;
+    let tags = bookmarkInfo.tags;
+    let excerpt = bookmarkInfo.excerpt;
+
+    let text = "";
+    text += title ? `title: ${title};` : '';
+    text += tags && tags.length > 0 ? `tags: ${tags.join(',')};` : '';
+    text += excerpt ? `excerpt: ${smartTruncate(excerpt, 200)};` : '';
     
     // 优化的文本清理
     text = text
@@ -40,6 +40,84 @@ function makeEmbeddingText(pageContent, tab, tags) {
     }
     
     return text;
+}
+
+/**
+ * 估算文本的 token 数量
+ * 根据不同语言类型使用不同的估算策略
+ * @param {string} text - 文本内容
+ * @returns {number} 估算的 token 数量
+ */
+function estimateTokens(text) {
+    if (!text) return 0;
+    
+    const textType = detectTextType(text);
+    
+    // 根据不同语言类型使用不同的估算系数
+    // 这些系数基于实际观察和 tokenizer 的特性
+    let tokensPerChar;
+    
+    switch (textType) {
+        case 'latin':
+        case 'cyrillic':
+        case 'arabic':
+            // 拉丁字母、西里尔字母、阿拉伯文：按单词计算更准确
+            // 平均每个单词约 4-5 个字符，每个单词约 1 token
+            // 因此约 0.2-0.25 tokens/字符
+            const words = text.split(/\s+/).filter(word => word.length > 0);
+            // 每个单词算 1 token，加上标点符号等
+            return Math.ceil(words.length * 1.1);
+            
+        case 'cjk':
+            // 中日韩文字：通常 1 个字符 = 1-2 tokens
+            // 对于中文，常用字约 1.5 tokens/字符
+            tokensPerChar = 1.5;
+            return Math.ceil(text.length * tokensPerChar);
+            
+        case 'mixed':
+        default:
+            // 混合文本：使用保守估算
+            // 统计拉丁字母单词数和 CJK 字符数
+            const latinWords = (text.match(/[a-zA-Z]+/g) || []).length;
+            const cjkChars = (text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) || []).length;
+            const otherChars = text.length - cjkChars;
+            
+            // 混合计算
+            return Math.ceil(latinWords * 1.1 + cjkChars * 1.5 + (otherChars - latinWords * 5) * 0.3);
+    }
+}
+
+/**
+ * 将文本数组分批，确保每批不超过最大数量和 token 限制
+ * @param {string[]} texts - 文本数组
+ * @returns {string[][]} 分批后的文本数组
+ */
+function splitTextsToBatches(texts) {
+    const batches = [];
+    let currentBatch = [];
+    let currentTokens = 0;
+    
+    for (const text of texts) {
+        const tokens = estimateTokens(text);
+        
+        // 检查是否需要开始新批次
+        if (currentBatch.length >= BATCH_EMBEDDING_CONFIG.MAX_BATCH_SIZE ||
+            (currentBatch.length > 0 && currentTokens + tokens > BATCH_EMBEDDING_CONFIG.MAX_TOTAL_TOKENS)) {
+            batches.push(currentBatch);
+            currentBatch = [];
+            currentTokens = 0;
+        }
+        
+        currentBatch.push(text);
+        currentTokens += tokens;
+    }
+    
+    // 添加最后一批
+    if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+    }
+    
+    return batches;
 }
 
 // 嵌入向量生成函数
@@ -95,6 +173,146 @@ async function getEmbedding(text) {
         logger.error(`获取嵌入向量失败: ${error.message}`);
     }
     return null;
+}
+
+/**
+ * 批量生成嵌入向量
+ * @param {string[]} texts - 文本数组
+ * @returns {Promise<Array<{text: string, embedding: number[]|null, error: string|null}>>} 
+ *          返回结果数组，每个元素包含原文本、embedding向量（成功时）或错误信息（失败时）
+ */
+async function getBatchEmbeddings(texts) {
+    logger.debug(`批量生成嵌入向量，共 ${texts.length} 个文本`);
+    
+    // 参数验证
+    if (!Array.isArray(texts) || texts.length === 0) {
+        logger.error('getBatchEmbeddings: 参数必须是非空数组');
+        return [];
+    }
+    
+    try {
+        // 使用专门用于embedding的服务
+        const apiService = await ConfigManager.getEmbeddingService();
+        const apiKey = apiService.apiKey;
+        if (!apiKey || !apiService.embedModel) {
+            throw new Error('未配置有效的向量模型');
+        }
+        
+        // 将文本分批
+        const batches = splitTextsToBatches(texts);
+        logger.debug(`文本已分为 ${batches.length} 批次处理`);
+        
+        // 存储所有结果
+        const allResults = [];
+        let totalTokens = 0;
+        
+        // 逐批处理
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+            const batch = batches[batchIndex];
+            logger.debug(`处理第 ${batchIndex + 1}/${batches.length} 批次，包含 ${batch.length} 个文本`);
+            
+            try {
+                const response = await fetch(joinUrl(apiService.baseUrl, 'embeddings'), {
+                    method: 'POST',
+                    headers: getHeaders(apiKey),
+                    body: JSON.stringify({
+                        model: apiService.embedModel,
+                        input: batch, // 传入文本数组
+                        dimensions: 1024
+                    })
+                });
+                
+                // 检查错误码
+                if (!response.ok) {
+                    let errorMessage = response.statusText || `API 返回状态码: ${response.status}` || '未知错误';
+                    try {
+                        const errorData = await response.json();
+                        if (typeof errorData === 'string') {
+                            errorMessage = errorData;
+                        } else {
+                            errorMessage = errorData.error?.message || errorData.message || errorMessage;
+                        }
+                    } catch (error) {
+                        logger.debug('获取错误信息失败:', error);
+                    }
+                    
+                    // 当前批次失败，为该批次的所有文本添加错误结果
+                    logger.error(`批次 ${batchIndex + 1} 请求失败: ${errorMessage}`);
+                    for (const text of batch) {
+                        allResults.push({
+                            text: text,
+                            embedding: null,
+                            error: errorMessage
+                        });
+                    }
+                    continue; // 继续处理下一批次
+                }
+                
+                // 解析响应
+                const data = await response.json();
+                logger.debug(`批次 ${batchIndex + 1} 响应:`, {
+                    dataCount: data.data?.length,
+                    usage: data.usage
+                });
+                
+                if (!data.data || !Array.isArray(data.data)) {
+                    throw new Error('无效的API响应格式');
+                }
+                
+                // 记录 token 使用量
+                if (data.usage?.total_tokens) {
+                    totalTokens += data.usage.total_tokens;
+                }
+                
+                // 按索引匹配结果
+                // API 返回的 data 数组中，每个元素都有 index 字段，对应输入数组的索引
+                for (let i = 0; i < batch.length; i++) {
+                    const embeddingData = data.data.find(item => item.index === i);
+                    if (embeddingData && embeddingData.embedding) {
+                        allResults.push({
+                            text: batch[i],
+                            embedding: embeddingData.embedding,
+                            error: null
+                        });
+                    } else {
+                        allResults.push({
+                            text: batch[i],
+                            embedding: null,
+                            error: '未返回有效的embedding数据'
+                        });
+                    }
+                }
+                
+            } catch (error) {
+                logger.error(`批次 ${batchIndex + 1} 处理失败:`, error);
+                // 为该批次的所有文本添加错误结果
+                for (const text of batch) {
+                    allResults.push({
+                        text: text,
+                        embedding: null,
+                        error: error.message
+                    });
+                }
+            }
+        }
+        
+        // 记录总的使用统计
+        if (totalTokens > 0) {
+            await statsManager.recordEmbeddingUsage(totalTokens);
+        }
+        
+        logger.debug(`批量生成嵌入向量完成，成功: ${allResults.filter(r => r.embedding).length}/${texts.length}`);
+        return allResults;
+        
+    } catch (error) {
+        logger.error(`批量生成嵌入向量失败: ${error.message}`);
+        // 返回所有文本的错误结果
+        return texts.map(text => ({
+            text: text,
+            embedding: null,
+            error: error.message
+        }));
+    }
 }
 
 async function getChatCompletion(systemPrompt, userPrompt, signal = null) {

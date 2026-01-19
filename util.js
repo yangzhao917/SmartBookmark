@@ -24,29 +24,6 @@ async function validateToken() {
     }
 }
 
-async function recordBookmarkChange(bookmarks, isDeleted = false, beginSync = true, onError = null) {
-    sendMessageSafely({
-        type: MessageType.SYNC_BOOKMARK_CHANGE,
-        data: { bookmarks, isDeleted }
-    }, (response) => {
-        logger.debug("recordBookmarkChange response", response);
-        if (!response.success && onError) {
-            onError(response.error);
-        }
-    });
-    // 预定同步
-    if (beginSync) {
-        sendMessageSafely({
-            type: MessageType.SCHEDULE_SYNC,
-            data: {
-                reason: ScheduleSyncReason.BOOKMARKS
-            }
-        }, (response) => {
-            logger.debug("预定同步结果: ", response);
-        });
-    }
-}
-
 async function updateSettingsWithSync(updates) {
     await SettingsManager.update(updates);
     sendMessageSafely({
@@ -54,6 +31,9 @@ async function updateSettingsWithSync(updates) {
         data: {
             reason: ScheduleSyncReason.SETTINGS
         }
+    });
+    sendMessageSafely({
+        type: MessageType.SETTINGS_CHANGED
     });
 }
 
@@ -89,6 +69,7 @@ async function updateBookmarkUsage(url) {
     try {
         const data = await LocalStorageMgr.getBookmark(url, true);
         if (data) {
+            logger.debug('更新书签使用频率', { url: url, data: data });
             const bookmark = data;
 
             // 更新使用次数和最后使用时间
@@ -98,13 +79,12 @@ async function updateBookmarkUsage(url) {
             ) + 1;
             bookmark.lastUsed = Date.now();
 
-            await LocalStorageMgr.setBookmark(url, bookmark);
-            return bookmark;
+            await LocalStorageMgr.setBookmark(url, bookmark, { noUpdateEmbedding: true });
+            logger.debug('更新书签使用频率完成', { url: url, bookmark: bookmark });
         }
     } catch (error) {
         logger.error('更新书签使用频率失败:', error);
     }
-    return null;
 }
 
 // 批量更新书签使用频率
@@ -120,7 +100,8 @@ async function batchUpdateBookmarksUsage(urls) {
             ) + 1;
             bookmark.lastUsed = Date.now();
         }
-        await LocalStorageMgr.setBookmarks(bookmarks);
+        await LocalStorageMgr.setBookmarks(bookmarks, { noUpdateEmbedding: true });
+        logger.debug('批量更新书签使用频率完成', { bookmarks: bookmarks, urls: urls });
     } catch (error) {
         logger.error('批量更新书签使用频率失败:', error);
     }
@@ -145,11 +126,11 @@ function calculateWeightedScore(useCount, lastUsed) {
     return Math.round(weightedScore);
 }
 
-async function getAllBookmarks(includeChromeBookmarks = false, fromLocalCache = false) {
+async function getAllBookmarks(includeChromeBookmarks = false, withEmbedding = false) {
     try {
         // 获取扩展书签
         let extensionBookmarks = {};
-        if (fromLocalCache) {
+        if (!withEmbedding) {
             extensionBookmarks = await LocalStorageMgr.getBookmarksFromLocalCache();
         }
         if (Object.keys(extensionBookmarks).length === 0) {
@@ -177,8 +158,6 @@ async function getAllBookmarks(includeChromeBookmarks = false, fromLocalCache = 
             logger.debug('删除不可标记的扩展书签', { count: bookmarksToDelete.length, urls: bookmarksToDelete.map(b => b.url) });
             // 批量删除书签
             await LocalStorageMgr.removeBookmarks(bookmarksToDelete.map(b => b.url));
-            // 记录变更并同步
-            await recordBookmarkChange(bookmarksToDelete, true, true);
         }
 
         let chromeBookmarksMap = {};
@@ -208,9 +187,13 @@ async function getAllBookmarks(includeChromeBookmarks = false, fromLocalCache = 
     }
 }
 
-async function getDisplayedBookmarks(fromLocalCache = false) {
+async function getDisplayedBookmarks() {
     const showChromeBookmarks = await SettingsManager.get('display.showChromeBookmarks');
-    return await getAllBookmarks(showChromeBookmarks, fromLocalCache);
+    return await getAllBookmarks(showChromeBookmarks, false);
+}
+
+async function getBookmarksForSearch(includeChromeBookmarks = false) {
+    return await getAllBookmarks(includeChromeBookmarks, true);
 }
 
 // 获取Chrome书签的辅助函数
@@ -834,54 +817,61 @@ async function checkUrlAccessibility(url) {
     return {accessible: true, reason: '可访问'};
 }
 
+
+/**
+ * 检测文本的主要语言类型
+ * @param {string} text - 文本内容
+ * @returns {string} 语言类型：'latin', 'cjk', 'cyrillic', 'arabic', 'mixed'
+ */
+function detectTextType(text) {
+    if (!text) return 'mixed';
+    
+    // 统计前200个字符的语言特征（比 smartTruncate 多一些样本以提高准确性）
+    const sample = text.slice(0, 200);
+    
+    // 统计不同类型字符的数量
+    const stats = {
+        latin: 0,      // 拉丁字母 (英文等)
+        cjk: 0,        // 中日韩文字
+        cyrillic: 0,   // 西里尔字母 (俄文等)
+        arabic: 0,     // 阿拉伯文
+        other: 0       // 其他字符
+    };
+    
+    // 遍历样本文本的每个字符
+    for (const char of sample) {
+        if (/[\p{Script=Latin}]/u.test(char)) {
+            stats.latin++;
+        } else if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(char)) {
+            stats.cjk++;
+        } else if (/[\p{Script=Cyrillic}]/u.test(char)) {
+            stats.cyrillic++;
+        } else if (/[\p{Script=Arabic}]/u.test(char)) {
+            stats.arabic++;
+        } else if (!/[\s\p{P}]/u.test(char)) { // 排除空格和标点
+            stats.other++;
+        }
+    }
+    
+    // 计算主要字符类型的占比
+    const total = Object.values(stats).reduce((a, b) => a + b, 0);
+    if (total === 0) return 'mixed';
+    
+    const threshold = 0.9; // 90%的阈值
+    
+    // 返回主要语言类型
+    if (stats.latin / total > threshold) return 'latin';
+    if (stats.cjk / total > threshold) return 'cjk';
+    if (stats.cyrillic / total > threshold) return 'cyrillic';
+    if (stats.arabic / total > threshold) return 'arabic';
+    
+    // 如果没有明显主导的语言类型，返回混合类型
+    return 'mixed';
+}
+
 function smartTruncate(text, maxLength = 500) {
     if (!text) return text;
     if (text.length <= maxLength) return text;
-
-    // 检测文本类型的辅助函数
-    const detectTextType = (text) => {
-        // 统计前100个字符的语言特征
-        const sample = text.slice(0, 100);
-
-        // 统计不同类型字符的数量
-        const stats = {
-            latin: 0,      // 拉丁字母 (英文等)
-            cjk: 0,       // 中日韩文字
-            cyrillic: 0,  // 西里尔字母 (俄文等)
-            arabic: 0,    // 阿拉伯文
-            other: 0      // 其他字符
-        };
-
-        // 遍历样本文本的每个字符
-        for (const char of sample) {
-            const code = char.codePointAt(0);
-
-            if (/[\p{Script=Latin}]/u.test(char)) {
-                stats.latin++;
-            } else if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(char)) {
-                stats.cjk++;
-            } else if (/[\p{Script=Cyrillic}]/u.test(char)) {
-                stats.cyrillic++;
-            } else if (/[\p{Script=Arabic}]/u.test(char)) {
-                stats.arabic++;
-            } else if (!/[\s\p{P}]/u.test(char)) { // 排除空格和标点
-                stats.other++;
-            }
-        }
-
-        // 计算主要字符类型的占比
-        const total = Object.values(stats).reduce((a, b) => a + b, 0);
-        const threshold = 0.6; // 60%的阈值
-
-        // 返回主要语言类型
-        if (stats.latin / total > threshold) return 'latin';
-        if (stats.cjk / total > threshold) return 'cjk';
-        if (stats.cyrillic / total > threshold) return 'cyrillic';
-        if (stats.arabic / total > threshold) return 'arabic';
-
-        // 如果没有明显主导的语言类型，返回混合类型
-        return 'mixed';
-    };
 
     const textType = detectTextType(text);
     logger.debug('文本类型:', textType);
@@ -1158,6 +1148,132 @@ async function checkAPIKeyValidSafe(checkType) {
         await checkAPIKeyValid(checkType);
         return true;
     } catch (error) {
+        return false;
+    }
+}
+
+async function searchBookmarksFromBackground(query, options = {}) {
+    logger.debug('从background搜索书签', { query: query, options: options });
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: MessageType.SEARCH_BOOKMARKS,
+            data: {
+                query: query,
+                options: options
+            }
+        });
+        if (!response.success) {
+            throw new Error(response.error);
+        }
+        return response.results || [];
+    }
+    catch (error) {
+        logger.error('搜索书签失败:', error);
+        return [];
+    }
+}
+
+async function getFullBookmarksFromBackground() {
+    logger.debug('从background获取全部书签');
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: MessageType.GET_FULL_BOOKMARKS
+        });
+        if (!response.success) {
+            throw new Error(response.error);
+        }
+        logger.debug('从background获取全部书签完成', { response: response });
+        return response.bookmarks || {};
+    } catch (error) {
+        logger.error('获取书签失败:', error);
+        return {};
+    }
+}
+
+ async function setBookmarksToBackground(bookmarks, options = {}) {
+    logger.debug('从background更新书签', { bookmarks: bookmarks, options: options });
+    try {
+        const result = await chrome.runtime.sendMessage({
+            type: MessageType.SET_BOOKMARKS,
+            data: {
+                bookmarks: bookmarks,
+                options: options
+            }
+        });
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+        logger.debug('从background更新书签完成', { result: result });
+        return true;
+    } catch (error) {
+        logger.error('更新书签失败:', error);
+        return false;
+    }
+}
+
+async function updateBookmarksAndEmbedding(bookmarks, options = {}) {
+    logger.debug('从background更新书签和向量', { bookmarks: bookmarks, options: options });
+    try {
+        const bookmarkArray = Array.isArray(bookmarks) ? bookmarks : [bookmarks];
+        // 将书签转换为本地格式
+        const localBookmarks = bookmarkArray.map(bookmark => {
+            return unifiedBookmarkToLocalFormat(bookmark);
+        });
+        const result = await chrome.runtime.sendMessage({
+            type: MessageType.UPDATE_BOOKMARKS_AND_EMBEDDING,
+            data: {
+                bookmarks: localBookmarks,
+                options: options
+            }
+        });
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+        logger.debug('从background更新书签和向量完成', { result: result });
+        return true;
+    } catch (error) {
+        logger.error('更新书签和向量失败:', error);
+        return false;
+    }
+}
+
+async function removeBookmarksByBackground(urls, options = {}) {
+    logger.debug('从background删除书签', { urls: urls, options: options });
+    try {
+        const result = await chrome.runtime.sendMessage({
+            type: MessageType.REMOVE_BOOKMARKS,
+            data: {
+                urls: urls,
+                options: options
+            }
+        });
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+        logger.debug('从background删除书签完成', { result: result });
+        return true;
+    } catch (error) {
+        logger.error('删除书签失败:', error);
+        return false;
+    }
+}   
+
+async function clearBookmarksByBackground(options = {}) {
+    logger.debug('从background清除书签', { options: options });
+    try {
+        const result = await chrome.runtime.sendMessage({
+            type: MessageType.CLEAR_BOOKMARKS,
+            data: {
+                options: options
+            }
+        });
+        if (!result.success) {
+            throw new Error(result.error);
+        }
+        logger.debug('从background清除书签完成', { result: result });
+        return true;
+    } catch (error) {
+        logger.error('清除书签失败:', error);
         return false;
     }
 }

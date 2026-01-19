@@ -2502,11 +2502,18 @@ class ImportExportSettingsTab extends BaseSettingsTab {
         
         // 添加关闭按钮事件监听
         this.importProgressDialog.querySelector('.close-dialog-btn').addEventListener('click', this.handleCloseImportProgress);
+        
         logger.debug('初始化导入导出设置完成', Date.now()/1000);
     }
 
     // 处理从浏览器导入书签
     async handleImportBrowser() {
+        // 检查功能开关
+        if (!FEATURE_FLAGS.ENABLE_BROWSER_IMPORT) {
+            showToast('浏览器书签批量导入功能已禁用', true);
+            return;
+        }
+        
         try {
             // 显示书签选择对话框
             this.bookmarkSelectDialog.classList.add('show');
@@ -2881,12 +2888,6 @@ class ImportExportSettingsTab extends BaseSettingsTab {
                     type: MessageType.BOOKMARKS_UPDATED,
                     source: 'import_from_browser'
                 });
-                sendMessageSafely({
-                    type: MessageType.SCHEDULE_SYNC,
-                    data: {
-                        reason: ScheduleSyncReason.BOOKMARKS
-                    }
-                });
             }
         } catch (error) {
             logger.error('导入失败:', error);
@@ -2908,23 +2909,22 @@ class ImportExportSettingsTab extends BaseSettingsTab {
             const parentTitles = parentPath.map(p => p.title).filter(p => p);
             const folderTags = this.keepFolderTags.checked ? parentTitles.slice(1) : [];
             const finalTags = [...new Set([...folderTags, ...tags])];
-            const embeddingText = makeEmbeddingText({}, bookmark, finalTags);
-            const embedding = await getEmbedding(embeddingText);
 
             const bookmarkInfo = {
                 url: bookmark.url,
                 title: bookmark.title,
                 tags: finalTags,
                 excerpt: '',
-                embedding: embedding,
                 savedAt: getDateTimestamp(bookmark.dateAdded),
                 useCount: 0,
                 lastUsed: getDateTimestamp(bookmark.dateLastUsed),
                 apiService: apiService.id,
                 embedModel: apiService.embedModel,
             };
+            const embedding = await getEmbedding(makeEmbeddingText(bookmarkInfo));
+            bookmarkInfo.embedding = embedding;
+
             await LocalStorageMgr.setBookmark(bookmarkInfo.url, bookmarkInfo);
-            await recordBookmarkChange(bookmarkInfo, false, false);
             this.importStats.imported++;
             logger.debug('导入的书签信息:', bookmarkInfo);
         } finally {
@@ -3289,6 +3289,17 @@ class SettingsUI {
                 cloudConfigDialog.classList.remove('disabled');
             }
         }
+        
+        // 隐藏浏览器书签导入相关UI
+        if (!FEATURE_FLAGS.ENABLE_BROWSER_IMPORT) {
+            const importBrowserBtn = document.getElementById('import-browser-btn');
+            if (importBrowserBtn) {
+                const browserImportCard = importBrowserBtn.closest('.import-export-card');
+                if (browserImportCard) {
+                    browserImportCard.style.display = 'none';
+                }
+            }
+        }
     }
 }
 
@@ -3302,7 +3313,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     await customFilter.init();
     await settingsUI.initialize();
     await Promise.all([
-        LocalStorageMgr.setupListener(),
         SettingsManager.init(),
         SyncSettingsManager.init(),
     ]);

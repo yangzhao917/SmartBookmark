@@ -33,7 +33,7 @@ class SyncManager {
         }
     }
 
-    // 记录书签变更
+    // 记录书签变更 (已废弃)
     async recordBookmarkChange(bookmarks, isDeleted = false) {
         if (!FEATURE_FLAGS.ENABLE_CLOUD_SYNC) {
             return;
@@ -347,7 +347,7 @@ class SyncManager {
             for (let i = 0; i < urlsArray.length; i += batchSize) {
                 const batch = urlsArray.slice(i, i + batchSize);
                 logger.debug(`批量删除书签 ${i + 1}-${i + batch.length}/${urlsArray.length}`);
-                await LocalStorageMgr.removeBookmarks(batch);
+                await LocalStorageMgr.removeBookmarks(batch, { noSync: true });
             }
         }
 
@@ -358,7 +358,7 @@ class SyncManager {
             for (let i = 0; i < bookmarksArray.length; i += batchSize) {
                 const batch = bookmarksArray.slice(i, i + batchSize);
                 logger.debug(`批量保存书签 ${i + 1}-${i + batch.length}/${bookmarksArray.length}`);
-                await LocalStorageMgr.setBookmarks(batch);
+                await LocalStorageMgr.setBookmarks(batch, { noSync: true });
             }
         }
 

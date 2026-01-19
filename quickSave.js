@@ -459,36 +459,15 @@ class QuickSaveManager {
             } catch (error) {
                 throw new Error('URL格式错误');
             }
-
-            // 生成嵌入向量
-            let embedding = this.isEditMode ? this.editingBookmark.embedding : null;
-            let needRegenerate = false;
-            if (this.isEditMode) {
-                needRegenerate = title !== this.editingBookmark.title || excerpt !== this.editingBookmark.excerpt || JSON.stringify(tags) !== JSON.stringify(this.editingBookmark.tags);
-            }
-            if (!this.isEditMode || needRegenerate) {
-                this.showStatus(i18n.M('msg_status_generating_embedding'), 'success');
-                const pageContent = {
-                    title: title,
-                    excerpt: excerpt,
-                }
-                embedding = await getEmbedding(makeEmbeddingText(pageContent, this.currentTab, tags));
-            }
-
-            // 获取当前服务信息
-            const apiService = await ConfigManager.getEmbeddingService();
             
             const pageInfo = {
                 url: url, 
                 title: title,
                 tags: tags,
                 excerpt: excerpt,
-                embedding: embedding,
                 savedAt: this.isEditMode ? this.editingBookmark.savedAt : Date.now(),
                 useCount: this.isEditMode ? this.editingBookmark.useCount : 1,
                 lastUsed: Date.now(),
-                apiService: this.isEditMode ? this.editingBookmark.apiService : apiService.id,
-                embedModel: this.isEditMode ? this.editingBookmark.embedModel : apiService.embedModel,
             };
 
             // 打印书签编辑信息
@@ -503,12 +482,10 @@ class QuickSaveManager {
             // 如果编辑模式下URL发生变化，则先删除旧书签
             if (this.isEditMode && this.editingBookmark.url !== url) {
                 await LocalStorageMgr.removeBookmark(this.editingBookmark.url);
-                await recordBookmarkChange(this.editingBookmark, true, false);
             }
             
             // 保存新书签
-            await LocalStorageMgr.setBookmark(url, pageInfo);
-            await recordBookmarkChange(pageInfo, false, true);
+            await updateBookmarksAndEmbedding(pageInfo);
             await updateExtensionIcon(this.currentTab.id, true);
 
             sendMessageSafely({
@@ -534,7 +511,6 @@ class QuickSaveManager {
                 const bookmark = await LocalStorageMgr.getBookmark(this.currentTab.url, true);
                 if (bookmark) {
                     await LocalStorageMgr.removeBookmark(this.currentTab.url);
-                    await recordBookmarkChange(bookmark, true, true);
                     await updateExtensionIcon(this.currentTab.id, false);
 
                     sendMessageSafely({

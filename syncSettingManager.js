@@ -131,7 +131,6 @@ class SyncSettingsManager {
                 autoSync: false,       // 自动同步
                 interval: 15,         // 同步间隔（分钟）
                 mechanism: 'merge',    // 同步机制：merge（合并）, override（覆盖）
-                syncEmbeddings: true  // 同步书签向量数据
             }
         }
     };

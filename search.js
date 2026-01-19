@@ -87,7 +87,7 @@ class SearchManager {
 
     // 搜索书签
     async searchBookmarks(queryEmbedding, searchInput, maxResults = 50, includeUrl = false, includeChromeBookmarks = false) {
-        const allBookmarks = await getAllBookmarks(includeChromeBookmarks);
+        const allBookmarks = await getBookmarksForSearch(includeChromeBookmarks);
         
         // 获取API服务配置
         const apiService = await ConfigManager.getEmbeddingService();

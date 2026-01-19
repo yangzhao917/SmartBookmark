@@ -347,11 +347,9 @@ class ImportExportManager {
                     const bookmarks = await LocalStorageMgr.getBookmarksList();
                     if (bookmarks.length > 0) {
                         await LocalStorageMgr.clearBookmarks();
-                        await recordBookmarkChange(bookmarks, true, false);
                     }
                 }
                 await LocalStorageMgr.setBookmarks(data.bookmarks);
-                await recordBookmarkChange(data.bookmarks, false, false);
                 importedCount += data.bookmarks.length;
             }
             
@@ -392,14 +390,6 @@ class ImportExportManager {
                     source: 'import_from_file'
                 });
             }
-
-            // 预定同步
-            sendMessageSafely({
-                type: MessageType.SCHEDULE_SYNC,
-                data: {
-                    reason: ScheduleSyncReason.BOOKMARKS
-                }
-            });
 
             this.hideImportDialog();
         } catch (error) {
