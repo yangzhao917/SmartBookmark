@@ -770,11 +770,22 @@ class BookmarkManager {
                     const tagElement = e.target.parentElement;
                     tagElement.remove();
                 } else if (e.target.classList.contains('tag-text')) {
-                    // 点击标签本身，将标签内容设置到输入框中
+                    // 点击扁平标签本身，将标签内容设置到输入框中
                     const tagText = e.target.textContent.trim();
                     if (newTagInput && tagText) {
                         newTagInput.value = tagText;
                         newTagInput.focus();
+                    }
+                } else if (e.target.className && e.target.className.startsWith('tag-level-')) {
+                    // 点击层级标签的某个层级，将完整标签路径设置到输入框中
+                    const tagElement = e.target.closest('.tag');
+                    if (tagElement && tagElement.classList.contains('hierarchical-tag')) {
+                        const levelSpans = tagElement.querySelectorAll('[class^="tag-level-"]');
+                        const fullPath = Array.from(levelSpans).map(span => span.textContent.trim()).join('/');
+                        if (newTagInput && fullPath) {
+                            newTagInput.value = fullPath;
+                            newTagInput.focus();
+                        }
                     }
                 }
             });
@@ -1087,9 +1098,20 @@ class BookmarkManager {
     getCurrentTags() {
         const { tagsList } = this.elements.required;
         if (!tagsList) return [];
-        
-        const tagElements = tagsList.querySelectorAll('.tag-text');
-        return Array.from(tagElements).map(el => el.textContent.trim());
+
+        const tagElements = tagsList.querySelectorAll('.tag');
+        return Array.from(tagElements).map(tagEl => {
+            // 检查是否为层级标签
+            if (tagEl.classList.contains('hierarchical-tag')) {
+                // 提取所有层级span的文本并用/连接
+                const levelSpans = tagEl.querySelectorAll('[class^="tag-level-"]');
+                return Array.from(levelSpans).map(span => span.textContent.trim()).join('/');
+            } else {
+                // 扁平标签
+                const tagText = tagEl.querySelector('.tag-text');
+                return tagText ? tagText.textContent.trim() : '';
+            }
+        }).filter(tag => tag); // 过滤空标签
     }
 
     // 验证URL格式
@@ -1194,7 +1216,7 @@ class BookmarkManager {
         } else {
             // 没有缓存或URL不匹配，重新生成标签
             StatusManager.startOperation('正在生成标签');
-            this.generatedTags = await generateTags(this.pageContent, tab);
+            this.generatedTags = await generateHierarchicalTags(this.pageContent, tab);
             StatusManager.endOperation('标签生成完成');
         }   
 
@@ -1334,14 +1356,36 @@ class BookmarkManager {
     renderTags(tags) {
         const tagsList = document.getElementById('tags-list');
         tagsList.innerHTML = '';
-        
+
         tags.forEach(tag => {
             const tagElement = document.createElement('span');
-            tagElement.className = 'tag';
-            tagElement.innerHTML = `
-                <span class="tag-text">${tag}</span>
-                <button class="remove-tag-btn">×</button>
-            `;
+
+            // 检查是否为层级标签
+            if (tag.includes('/')) {
+                // 渲染层级标签
+                tagElement.className = 'tag hierarchical-tag';
+                const parts = tag.split('/');
+                let innerHTML = '';
+
+                parts.forEach((part, index) => {
+                    const levelClass = `tag-level-${index + 1}`;
+                    innerHTML += `<span class="${levelClass}">${part.trim()}</span>`;
+                    if (index < parts.length - 1) {
+                        innerHTML += '<span class="tag-separator">/</span>';
+                    }
+                });
+
+                innerHTML += '<button class="remove-tag-btn">×</button>';
+                tagElement.innerHTML = innerHTML;
+            } else {
+                // 渲染扁平标签
+                tagElement.className = 'tag';
+                tagElement.innerHTML = `
+                    <span class="tag-text">${tag}</span>
+                    <button class="remove-tag-btn">×</button>
+                `;
+            }
+
             tagsList.appendChild(tagElement);
         });
     }

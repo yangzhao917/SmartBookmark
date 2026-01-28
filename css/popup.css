@@ -2582,6 +2582,90 @@ input[type="checkbox"] {
     background: var(--action-light-hover);
 }
 
+/* 树形筛选器样式 */
+.filter-tree {
+    display: flex;
+    flex-direction: column;
+}
+
+.filter-tree-node {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    user-select: none;
+    font-size: 12px;
+}
+
+.filter-tree-node:hover {
+    background: var(--bg-tertiary);
+}
+
+.expand-btn {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 10px;
+    margin-right: 4px;
+    transition: transform 0.2s;
+}
+
+.expand-btn:hover {
+    color: var(--text-primary);
+}
+
+.expand-placeholder {
+    width: 16px;
+    height: 16px;
+    display: inline-block;
+    margin-right: 4px;
+}
+
+.filter-tree-node .filter-name {
+    flex: 1;
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.filter-tree-node .filter-name:hover {
+    background: var(--bg-secondary);
+}
+
+.filter-tree-node .filter-name.selected {
+    background: var(--primary-color);
+    color: white;
+    font-weight: 500;
+}
+
+.filter-tree-node .filter-count {
+    margin-left: 8px;
+    padding: 2px 6px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border-radius: 10px;
+    font-size: 11px;
+    min-width: 20px;
+    text-align: center;
+}
+
+.filter-tree-node .filter-name.selected + .filter-count {
+    background: var(--action-light);
+    color: var(--action-color);
+}
+
+.filter-tree-children {
+    display: flex;
+    flex-direction: column;
+}
+
 /* 添加媒体查询，在较窄的侧边栏下调整布局 */
 @media (max-width: 300px) {
     .filter-menu {
