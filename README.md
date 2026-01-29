@@ -429,7 +429,7 @@ cd SmartBookmark
 ### 交流讨论
 
 - **微信：**
-  <img width="200" src="pic/wechat2.jpg" alt="微信二维码" />
+  <img width="200" src="pic/wechat2.JPG" alt="微信二维码" />
 
 - EMail：yz0917@foxmail.com
 ---
