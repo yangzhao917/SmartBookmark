@@ -749,7 +749,7 @@ class BookmarkManager {
             // 回车键提交新标签
             newTagInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
-                    const newTag = newTagInput.value.trim();
+                    const newTag = newTagInput.value.trim().replace(/>/g, '/'); // 将>转换为/
                     if (newTag) {
                         const currentTags = this.getCurrentTags();
                         if (!currentTags.includes(newTag)) {
@@ -760,6 +760,21 @@ class BookmarkManager {
                         }
                     }
                 }
+            });
+
+            // 输入时显示自动补全建议
+            newTagInput.addEventListener('input', async (e) => {
+                const inputValue = e.target.value.trim();
+                if (inputValue.length > 0) {
+                    await this.showTagAutoComplete(inputValue);
+                } else {
+                    this.hideTagSuggestions();
+                }
+            });
+
+            // 失去焦点时隐藏建议（延迟以允许点击建议）
+            newTagInput.addEventListener('blur', () => {
+                setTimeout(() => this.hideTagSuggestions(), 200);
             });
         }
 
@@ -1388,6 +1403,99 @@ class BookmarkManager {
 
             tagsList.appendChild(tagElement);
         });
+    }
+
+    /**
+     * 显示标签自动补全建议
+     * @param {string} inputValue - 输入的值
+     */
+    async showTagAutoComplete(inputValue) {
+        // 获取所有现有书签的标签
+        const bookmarks = await LocalStorageMgr.getBookmarksList();
+        const allTags = new Set();
+
+        for (const bookmark of bookmarks) {
+            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            tags.forEach(tag => allTags.add(tag));
+        }
+
+        // 过滤匹配的标签（支持前缀和包含匹配）
+        const suggestions = Array.from(allTags).filter(tag => {
+            const normalizedTag = tag.toLowerCase();
+            const normalizedInput = inputValue.toLowerCase().replace(/>/g, '/');
+            return normalizedTag.includes(normalizedInput);
+        }).slice(0, 10); // 最多显示10个建议
+
+        if (suggestions.length > 0) {
+            this.renderTagSuggestions(suggestions, inputValue);
+        } else {
+            this.hideTagSuggestions();
+        }
+    }
+
+    /**
+     * 渲染标签建议列表
+     * @param {Array<string>} suggestions - 建议的标签列表
+     * @param {string} inputValue - 当前输入值
+     */
+    renderTagSuggestions(suggestions, inputValue) {
+        const newTagInput = this.elements.optional.newTagInput;
+        if (!newTagInput) return;
+
+        // 创建或获取建议容器
+        let suggestionsContainer = document.querySelector('.tag-suggestions');
+        if (!suggestionsContainer) {
+            suggestionsContainer = document.createElement('div');
+            suggestionsContainer.className = 'tag-suggestions';
+            newTagInput.parentElement.appendChild(suggestionsContainer);
+        }
+
+        // 清空并填充新建议
+        suggestionsContainer.innerHTML = '';
+        suggestions.forEach(tag => {
+            const suggestionItem = document.createElement('div');
+            suggestionItem.className = 'tag-suggestion-item';
+
+            // 高亮匹配部分
+            const normalizedInput = inputValue.toLowerCase().replace(/>/g, '/');
+            const normalizedTag = tag.toLowerCase();
+            const matchIndex = normalizedTag.indexOf(normalizedInput);
+
+            if (matchIndex !== -1) {
+                const before = tag.substring(0, matchIndex);
+                const match = tag.substring(matchIndex, matchIndex + inputValue.length);
+                const after = tag.substring(matchIndex + inputValue.length);
+                suggestionItem.innerHTML = `${before}<strong>${match}</strong>${after}`;
+            } else {
+                suggestionItem.textContent = tag;
+            }
+
+            // 点击建议项添加标签
+            suggestionItem.addEventListener('click', () => {
+                const currentTags = this.getCurrentTags();
+                if (!currentTags.includes(tag)) {
+                    this.renderTags([...currentTags, tag]);
+                    newTagInput.value = '';
+                } else {
+                    updateStatus('标签已存在', true);
+                }
+                this.hideTagSuggestions();
+            });
+
+            suggestionsContainer.appendChild(suggestionItem);
+        });
+
+        suggestionsContainer.style.display = 'block';
+    }
+
+    /**
+     * 隐藏标签建议
+     */
+    hideTagSuggestions() {
+        const suggestionsContainer = document.querySelector('.tag-suggestions');
+        if (suggestionsContainer) {
+            suggestionsContainer.style.display = 'none';
+        }
     }
 
     getEditedExcerpt() {
