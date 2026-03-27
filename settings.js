@@ -2410,6 +2410,7 @@ class ImportExportSettingsTab extends BaseSettingsTab {
         // 获取书签选择对话框中的元素
         this.bookmarkTree = document.getElementById('bookmark-tree');
         this.keepFolderTags = document.getElementById('keep-folder-tags');
+        this.useAiTags = document.getElementById('use-ai-tags');
         this.skipExisting = document.getElementById('skip-existing');
         this.selectAllCheckbox = document.getElementById('select-all-bookmarks');
         this.selectedCount = document.getElementById('selected-count');
@@ -2437,6 +2438,7 @@ class ImportExportSettingsTab extends BaseSettingsTab {
         this.handleConfirmImport = this.handleConfirmImport.bind(this);
         this.handleCloseImportProgress = this.handleCloseImportProgress.bind(this);
         this.handleEscKey = this.handleEscKey.bind(this);
+        this.updateSelectedCount = this.updateSelectedCount.bind(this);
         
         // 添加导入统计数据
         this.importStats = null;
@@ -2494,6 +2496,8 @@ class ImportExportSettingsTab extends BaseSettingsTab {
         this.selectAllCheckbox.addEventListener('change', this.handleSelectAll);
         this.cancelImportBtn.addEventListener('click', () => this.bookmarkSelectDialog.classList.remove('show'));
         this.confirmImportBtn.addEventListener('click', this.handleConfirmImport);
+        this.keepFolderTags.addEventListener('change', this.updateSelectedCount);
+        this.useAiTags.addEventListener('change', this.updateSelectedCount);
         
         // 绑定对话框关闭按钮
         this.bookmarkSelectDialog.querySelector('.close-dialog-btn').addEventListener('click', () => {
@@ -2506,7 +2510,7 @@ class ImportExportSettingsTab extends BaseSettingsTab {
         logger.debug('初始化导入导出设置完成', Date.now()/1000);
     }
 
-    // 处理从浏览器导入书签
+    // 处理导入浏览器书签
     async handleImportBrowser() {
         // 检查功能开关
         if (!FEATURE_FLAGS.ENABLE_BROWSER_IMPORT) {
@@ -2810,7 +2814,7 @@ class ImportExportSettingsTab extends BaseSettingsTab {
         this.selectedCount.textContent = selectedCount;
         
         // 计算预估token
-        const chatTokens = selectedCount * 300;
+        const chatTokens = this.useAiTags.checked ? selectedCount * 300 : 0;
         const embedTokens = selectedCount * 50;
         
         // 更新显示
@@ -2828,9 +2832,11 @@ class ImportExportSettingsTab extends BaseSettingsTab {
             // 重置取消标志
             this.importCancelled = false;
             
-            const chatService = await ConfigManager.getChatService();
-            if (!chatService.apiKey) {
-                throw new Error('请先配置API服务');
+            if (this.useAiTags.checked) {
+                const chatService = await ConfigManager.getChatService();
+                if (!chatService.apiKey) {
+                    throw new Error('请先配置API服务');
+                }
             }
 
             // 隐藏选择对话框，显示进度对话框
@@ -2869,7 +2875,7 @@ class ImportExportSettingsTab extends BaseSettingsTab {
                         throw new Error(`${reason}`);
                     }
                     if (this.skipExisting.checked && existingUrls.has(node.url)) {
-                        throw new Error(`书签已存在`);
+                        throw new Error('书签已存在');
                     }
                     await this.importBookmark(node, parentPath);
                     this.addImportLog(node, true);
@@ -2905,26 +2911,70 @@ class ImportExportSettingsTab extends BaseSettingsTab {
                 parentPath
             });
             const apiService = await ConfigManager.getEmbeddingService();
-            const hierarchicalTags = await generateHierarchicalTags({}, bookmark);
-            const parentTitles = parentPath.map(p => p.title).filter(p => p);
-            const folderTags = this.keepFolderTags.checked ? parentTitles.slice(1) : [];
-            const finalTags = [...new Set([...folderTags, ...hierarchicalTags])];
+            const aiTags = this.useAiTags.checked ? await generateHierarchicalTags({}, bookmark) : [];
+            const folderPathNodes = parentPath.filter(node => {
+                return node
+                    && node.title
+                    && node.id !== '0'
+                    && node.parentId !== '0';
+            });
+            const folderNames = this.keepFolderTags.checked ? folderPathNodes.map(node => node.title) : [];
+            const folderHierarchicalTags = [];
+            let currentPath = '';
+            folderNames.forEach(folderName => {
+                currentPath = currentPath ? `${currentPath}/${folderName}` : folderName;
+                folderHierarchicalTags.push(currentPath);
+            });
+            const folderFlatTags = extractFlatTags(folderHierarchicalTags);
+            const finalHierarchicalTags = normalizeHierarchicalTags([
+                ...aiTags,
+                ...(folderHierarchicalTags.length > 0 ? [folderHierarchicalTags[folderHierarchicalTags.length - 1]] : [])
+            ]);
+            const mergedTags = finalHierarchicalTags.length > 0
+                ? Array.from(new Set(extractFlatTags(finalHierarchicalTags)))
+                : [i18n.M('ui_tag_unclassified')];
+            const currentBookmark = await LocalStorageMgr.getBookmark(bookmark.url, true);
 
             const bookmarkInfo = {
+                ...(currentBookmark || {}),
                 url: bookmark.url,
                 title: bookmark.title,
-                tags: finalTags,
-                hierarchicalTags: finalTags,
+                tags: mergedTags,
+                hierarchicalTags: finalHierarchicalTags,
                 tagVersion: 2,
-                excerpt: '',
-                savedAt: getDateTimestamp(bookmark.dateAdded),
-                useCount: 0,
-                lastUsed: getDateTimestamp(bookmark.dateLastUsed),
+                excerpt: currentBookmark?.excerpt || '',
+                savedAt: currentBookmark?.savedAt || getDateTimestamp(bookmark.dateAdded),
+                useCount: currentBookmark?.useCount || 0,
+                lastUsed: getDateTimestamp(bookmark.dateLastUsed) || currentBookmark?.lastUsed || null,
                 apiService: apiService.id,
                 embedModel: apiService.embedModel,
+                source: BookmarkSource.EXTENSION,
+                importSource: 'chrome-folder-backup',
+                importedFromChrome: true,
+                importMeta: {
+                    ...(currentBookmark?.importMeta || {}),
+                    chromeId: bookmark.id,
+                    keepFolderTags: this.keepFolderTags.checked,
+                    parentFolderTitles: folderNames,
+                    folderPath: folderNames.join('/'),
+                    folderHierarchicalTags,
+                    folderFlatTags,
+                    importedAt: Date.now(),
+                    originalDateAdded: getDateTimestamp(bookmark.dateAdded),
+                    originalDateLastUsed: getDateTimestamp(bookmark.dateLastUsed)
+                }
             };
-            const embedding = await getEmbedding(makeEmbeddingText(bookmarkInfo));
-            bookmarkInfo.embedding = embedding;
+
+            const oldEmbeddingText = makeEmbeddingText(currentBookmark);
+            const newEmbeddingText = makeEmbeddingText(bookmarkInfo);
+            if (currentBookmark?.embedding && oldEmbeddingText === newEmbeddingText) {
+                bookmarkInfo.embedding = currentBookmark.embedding;
+                bookmarkInfo.apiService = currentBookmark.apiService;
+                bookmarkInfo.embedModel = currentBookmark.embedModel;
+            } else {
+                const embedding = await getEmbedding(makeEmbeddingText(bookmarkInfo));
+                bookmarkInfo.embedding = embedding;
+            }
 
             await LocalStorageMgr.setBookmark(bookmarkInfo.url, bookmarkInfo);
             this.importStats.imported++;

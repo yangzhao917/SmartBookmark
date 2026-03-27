@@ -52,6 +52,20 @@ class LocalStorageMgr {
         }
     }
 
+    static applyBookmarksLocalCache(bookmarksMap = {}) {
+        const normalizedBookmarksMap = {};
+        Object.values(bookmarksMap || {}).forEach(bookmark => {
+            if (bookmark && bookmark.url) {
+                normalizedBookmarksMap[bookmark.url] = {
+                    ...bookmark,
+                    isCached: true
+                };
+            }
+        });
+        this._bookmarksLocalCache = normalizedBookmarksMap;
+        return normalizedBookmarksMap;
+    }
+
     // 通知书签同步
     static async notifyBookmarkSync() {
         try {
@@ -69,7 +83,7 @@ class LocalStorageMgr {
             if (message.type === MessageType.BOOKMARK_STORAGE_UPDATED) {
                 if (EnvIdentifier !== "background") {
                     logger.debug('local storage manager 更新本地书签缓存', { bookmarksMap: message.data.bookmarksMap });
-                    this._bookmarksLocalCache = message.data.bookmarksMap;
+                    this.applyBookmarksLocalCache(message.data.bookmarksMap);
                 }
             }
         });
@@ -508,43 +522,31 @@ class LocalStorageMgr {
             return this._bookmarksLocalCache;
         }
         const bookmarks = await this.get(this.Namespace.BOOKMARK_CACHE);
-        // 转成map
         if (!bookmarks || !Array.isArray(bookmarks)) {
             logger.debug('获取本地书签缓存完成，缓存未命中');
-            this._bookmarksLocalCache = {};
-            return {};
-        }
-        
-        const bookmarksMap = {};
-        for (const bookmark of bookmarks) {
-            if (bookmark && bookmark.url) {
-                bookmark.isCached = true;
-                bookmarksMap[bookmark.url] = bookmark;
-            }
+            return this.applyBookmarksLocalCache({});
         }
         logger.debug('获取本地书签缓存完成，缓存未命中');
-        this._bookmarksLocalCache = bookmarksMap;
-        return bookmarksMap;
+        return this.applyBookmarksLocalCache(bookmarks);
     }
 
     static async updateBookmarkCache() {
         logger.debug('开始更新书签缓存');
         const bookmarksMap = await this.getBookmarks();
-        // 创建清理后的缓存副本，清除书签的apiService、embedModel、embedding
         const cleanedBookmarksMap = {};
-        for (const key in bookmarksMap) {
-            const bookmark = bookmarksMap[key];
-            const cleanedBookmark = {
+        for (const bookmark of Object.values(bookmarksMap)) {
+            if (!bookmark || !bookmark.url) {
+                continue;
+            }
+            cleanedBookmarksMap[bookmark.url] = {
                 ...bookmark,
                 apiService: undefined,
                 embedModel: undefined,
                 embedding: undefined
             };
-            cleanedBookmarksMap[key] = cleanedBookmark;
         }
-        this._bookmarksLocalCache = cleanedBookmarksMap;
         logger.debug('书签缓存更新完成');
-        return cleanedBookmarksMap;
+        return this.applyBookmarksLocalCache(cleanedBookmarksMap);
     }
 
     // 刷新书签缓存

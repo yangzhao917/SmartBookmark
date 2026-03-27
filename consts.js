@@ -66,5 +66,5 @@ const BATCH_EMBEDDING_CONFIG = {
 const FEATURE_FLAGS = {
     ENABLE_LOGIN: false,        // 暂时禁用登录功能
     ENABLE_CLOUD_SYNC: false,    // 暂时禁用云同步功能
-    ENABLE_BROWSER_IMPORT: false, // 暂时禁用浏览器书签批量导入功能
+    ENABLE_BROWSER_IMPORT: true, // 启用浏览器书签批量导入功能
 };

@@ -597,7 +597,9 @@ class QuickSaveManager {
         const allTags = new Set();
 
         for (const bookmark of bookmarks) {
-            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            const tags = Array.isArray(bookmark.hierarchicalTags) && normalizeHierarchicalTags(bookmark.hierarchicalTags).length > 0
+                ? normalizeHierarchicalTags(bookmark.hierarchicalTags)
+                : normalizeHierarchicalTags(bookmark.tags || []);
             tags.forEach(tag => allTags.add(tag));
         }
 

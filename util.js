@@ -126,14 +126,14 @@ function calculateWeightedScore(useCount, lastUsed) {
     return Math.round(weightedScore);
 }
 
-async function getAllBookmarks(includeChromeBookmarks = false, withEmbedding = false) {
+async function getAllBookmarks(includeChromeBookmarks = false, withEmbedding = false, forceRefresh = false) {
     try {
         // 获取扩展书签
         let extensionBookmarks = {};
-        if (!withEmbedding) {
+        if (!withEmbedding && !forceRefresh) {
             extensionBookmarks = await LocalStorageMgr.getBookmarksFromLocalCache();
         }
-        if (Object.keys(extensionBookmarks).length === 0) {
+        if (forceRefresh || Object.keys(extensionBookmarks).length === 0) {
             extensionBookmarks = await LocalStorageMgr.getBookmarks();
         }
         
@@ -187,9 +187,9 @@ async function getAllBookmarks(includeChromeBookmarks = false, withEmbedding = f
     }
 }
 
-async function getDisplayedBookmarks() {
+async function getDisplayedBookmarks(forceRefresh = false) {
     const showChromeBookmarks = await SettingsManager.get('display.showChromeBookmarks');
-    return await getAllBookmarks(showChromeBookmarks, false);
+    return await getAllBookmarks(showChromeBookmarks, false, forceRefresh);
 }
 
 async function getBookmarksForSearch(includeChromeBookmarks = false) {
@@ -381,6 +381,132 @@ function cleanTags(tags) {
         // 移除序号、星号和多余空格
         return tag.replace(/^\d+\.\s*\*+|\*+/g, '').trim();
     });
+}
+
+function replaceTagPathPrefix(tags, oldFullPath, newFullPath) {
+    return (tags || []).map(tag => {
+        if (tag === oldFullPath) {
+            return newFullPath;
+        }
+        if (tag.startsWith(oldFullPath + '/')) {
+            return newFullPath + tag.slice(oldFullPath.length);
+        }
+        return tag;
+    });
+}
+
+function splitTagPath(path) {
+    return (path || '').split('/').map(part => part.trim()).filter(Boolean);
+}
+
+function getLeafHierarchicalTags(tags) {
+    const normalizedTags = normalizeHierarchicalTags(tags || []);
+    return normalizedTags.filter(tag => {
+        return !normalizedTags.some(otherTag => otherTag !== tag && otherTag.startsWith(tag + '/'));
+    });
+}
+
+function shouldDropOldFolderTag(tag, oldFullPath, oldFolderParts) {
+    return oldFolderParts.includes(tag) || tag === oldFullPath || tag.startsWith(oldFullPath + '/');
+}
+
+function getImportedFolderFlatTags(bookmark, oldFullPath) {
+    if (!bookmark.importedFromChrome) {
+        return [];
+    }
+    if (Array.isArray(bookmark.importMeta?.folderFlatTags)) {
+        return bookmark.importMeta.folderFlatTags.map(tag => tag && tag.trim()).filter(Boolean);
+    }
+    const importFolderParts = Array.isArray(bookmark.importMeta?.parentFolderTitles)
+        ? bookmark.importMeta.parentFolderTitles.map(part => part && part.trim()).filter(Boolean)
+        : [];
+    return importFolderParts.length > 0 ? importFolderParts : splitTagPath(oldFullPath);
+}
+
+function getImportedFolderHierarchicalTags(bookmark) {
+    if (!bookmark.importedFromChrome || !Array.isArray(bookmark.importMeta?.folderHierarchicalTags)) {
+        return [];
+    }
+    return normalizeHierarchicalTags(bookmark.importMeta.folderHierarchicalTags);
+}
+
+function shouldSyncImportedFolderTags(bookmark) {
+    return Boolean(bookmark.importedFromChrome && bookmark.importMeta?.keepFolderTags);
+}
+
+function buildUpdatedBookmarksForPathRename(affectedBookmarks, oldFullPath, newFullPath) {
+    return affectedBookmarks.map(bookmark => {
+        if (!shouldSyncImportedFolderTags(bookmark)) {
+            return bookmark;
+        }
+
+        const folderHierarchicalTags = getImportedFolderHierarchicalTags(bookmark);
+        const nextFolderHierarchicalTags = normalizeHierarchicalTags(replaceTagPathPrefix(folderHierarchicalTags, oldFullPath, newFullPath));
+        const oldFolderFlatTags = getImportedFolderFlatTags(bookmark, oldFullPath);
+        const nextFolderFlatTags = extractFlatTags(nextFolderHierarchicalTags);
+        const preservedHierarchicalTags = normalizeHierarchicalTags((bookmark.hierarchicalTags || []).filter(tag => !folderHierarchicalTags.includes(tag)));
+        const nextHierarchicalTags = normalizeHierarchicalTags([...preservedHierarchicalTags, ...nextFolderHierarchicalTags]);
+        const preservedTags = (bookmark.tags || []).filter(tag => !oldFolderFlatTags.includes(tag));
+        const nextTags = Array.from(new Set([...preservedTags, ...nextFolderFlatTags]));
+        const nextImportMeta = {
+            ...(bookmark.importMeta || {}),
+            parentFolderTitles: splitTagPath(newFullPath),
+            folderPath: newFullPath,
+            folderHierarchicalTags: nextFolderHierarchicalTags,
+            folderFlatTags: nextFolderFlatTags
+        };
+
+        return {
+            ...bookmark,
+            tags: nextTags,
+            hierarchicalTags: nextHierarchicalTags,
+            importMeta: nextImportMeta,
+            embedding: null
+        };
+    });
+}
+
+async function getChromeBookmarkNode(id) {
+    try {
+        const nodes = await chrome.bookmarks.get(id);
+        return nodes && nodes.length > 0 ? nodes[0] : null;
+    } catch (error) {
+        logger.error('获取Chrome书签节点失败:', { id, error });
+        return null;
+    }
+}
+
+async function getChromeFolderPathById(id) {
+    const path = [];
+    let currentId = id;
+
+    while (currentId) {
+        const node = await getChromeBookmarkNode(currentId);
+        if (!node) {
+            return null;
+        }
+        if (node.title && node.id !== '0' && node.parentId !== '0') {
+            path.unshift(node.title);
+        }
+        currentId = node.parentId;
+    }
+
+    return path.join('/');
+}
+
+async function getChromeDescendantUrls(folderId) {
+    try {
+        const subtree = await chrome.bookmarks.getSubTree(folderId);
+        if (!subtree || subtree.length === 0) {
+            return [];
+        }
+        return flattenBookmarkTree(subtree)
+            .map(bookmark => bookmark.url)
+            .filter(Boolean);
+    } catch (error) {
+        logger.error('获取Chrome文件夹子树失败:', { folderId, error });
+        return [];
+    }
 }
 
 // 获取隐私模式设置

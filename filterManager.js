@@ -86,8 +86,9 @@ class TagFilter extends BookmarkFilter {
     updateAvailableTags(bookmarks) {
         this.availableTags.clear();
         bookmarks.forEach(bookmark => {
-            // 优先使用层级标签，如果没有则使用扁平标签
-            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            const tags = Array.isArray(bookmark.hierarchicalTags) && normalizeHierarchicalTags(bookmark.hierarchicalTags).length > 0
+                ? normalizeHierarchicalTags(bookmark.hierarchicalTags)
+                : normalizeHierarchicalTags(bookmark.tags || []);
             tags.forEach(tag => this.availableTags.add(tag));
         });
         logger.debug('updateAvailableTags 完成，数量:', this.availableTags.size);
@@ -96,7 +97,9 @@ class TagFilter extends BookmarkFilter {
     async updateFilterCounts(bookmarks) {
         this.filterCounts.clear();
         bookmarks.forEach(bookmark => {
-            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            const tags = Array.isArray(bookmark.hierarchicalTags) && normalizeHierarchicalTags(bookmark.hierarchicalTags).length > 0
+                ? normalizeHierarchicalTags(bookmark.hierarchicalTags)
+                : normalizeHierarchicalTags(bookmark.tags || []);
             tags.forEach(tag => {
                 this.filterCounts.set(tag, (this.filterCounts.get(tag) || 0) + 1);
 
@@ -266,7 +269,9 @@ class TagFilter extends BookmarkFilter {
         if (this.activeFilters.size === 0) return bookmarks;
 
         return bookmarks.filter(bookmark => {
-            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            const tags = Array.isArray(bookmark.hierarchicalTags) && normalizeHierarchicalTags(bookmark.hierarchicalTags).length > 0
+                ? normalizeHierarchicalTags(bookmark.hierarchicalTags)
+                : normalizeHierarchicalTags(bookmark.tags || []);
 
             return tags.some(tag => {
                 // 精确匹配
@@ -685,15 +690,18 @@ class FilterManager {
         this.renderFilterOptions();
     }
 
-    async getFilteredBookmarks() {
+    async getFilteredBookmarks(bookmarksList = null) {
         // 获取所有书签
-        const bookmarks = await getDisplayedBookmarks();
+        if (!bookmarksList) {
+            const bookmarks = await getDisplayedBookmarks();
+            bookmarksList = Object.values(bookmarks);
+        }
         // 应用筛选
-        let filteredBookmarks = Object.values(bookmarks);
+        let filteredBookmarks = [...bookmarksList];
         if (this.activeFilter) {
             filteredBookmarks = this.activeFilter.filterBookmarks(filteredBookmarks);
         }
-        
+
         return filteredBookmarks;
     }
 

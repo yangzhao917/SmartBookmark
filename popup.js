@@ -1,5 +1,15 @@
 EnvIdentifier = 'popup';
 
+function getBookmarkHierarchyTags(bookmark) {
+    const hierarchicalTags = Array.isArray(bookmark?.hierarchicalTags)
+        ? normalizeHierarchicalTags(bookmark.hierarchicalTags)
+        : [];
+    if (hierarchicalTags.length > 0) {
+        return hierarchicalTags;
+    }
+    return normalizeHierarchicalTags(bookmark?.tags || []);
+}
+
 let quickSaveKey = 'Ctrl+B';
 let quickSearchKey = 'Ctrl+K';
 async function initShortcutKey() {
@@ -1206,7 +1216,7 @@ class BookmarkManager {
         if (bookmark) {
             await LocalStorageMgr.removeBookmark(tab.url);
             updateStatus('已取消收藏');
-            await refreshBookmarksInfo();
+            scheduleRefreshBookmarksInfo();
         }
     }
 
@@ -1415,7 +1425,7 @@ class BookmarkManager {
         const allTags = new Set();
 
         for (const bookmark of bookmarks) {
-            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            const tags = getBookmarkHierarchyTags(bookmark);
             tags.forEach(tag => allTags.add(tag));
         }
 
@@ -1513,10 +1523,13 @@ class BookmarkManager {
             // 获取编辑后的 URL 和摘要
             const url = this.getEditedUrl();
             const editedExcerpt = this.getEditedExcerpt();
+            const baseBookmark = this.isEditMode ? (this.editingBookmark || {}) : {};
             const pageInfo = {
+                ...baseBookmark,
                 url: url,
                 title: title,
                 tags: tags,
+                hierarchicalTags: normalizeHierarchicalTags(tags),
                 excerpt: editedExcerpt,
                 savedAt: this.isEditMode ? this.editingBookmark.savedAt : Date.now(),
                 useCount: this.isEditMode ? this.editingBookmark.useCount : 1,
@@ -1537,7 +1550,7 @@ class BookmarkManager {
                         
             await updateBookmarksAndEmbedding(pageInfo);
 
-            await refreshBookmarksInfo();
+            scheduleRefreshBookmarksInfo();
             StatusManager.endOperation(this.isEditMode ? '书签更新成功' : '书签保存成功', false);
         } catch (error) {
             logger.error('保存书签时出错:', error);
@@ -1909,7 +1922,7 @@ async function deleteBookmark(bookmark) {
                 }
                 
                 // 并行执行所有UI更新
-                await refreshBookmarksInfo();
+                scheduleRefreshBookmarksInfo();
 
                 updateStatus('书签已成功删除', false);
             }
@@ -2013,8 +2026,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         })();
     } else if (message.type === MessageType.TOGGLE_SEARCH) {
         toggleSearching();
+    } else if (message.type === MessageType.BOOKMARK_STORAGE_UPDATED) {
+        scheduleRefreshBookmarksInfo();
     } else if (message.type === MessageType.BOOKMARKS_UPDATED) {
-        refreshBookmarksInfo();
+        logger.debug('popup 收到书签变更通知，调度刷新界面');
+        scheduleRefreshBookmarksInfo();
     } else if (message.type === MessageType.SETTINGS_CHANGED) {
         if (window.settingsDialog) {
             window.settingsDialog.loadSettings();
@@ -2102,9 +2118,9 @@ function updateSaveButtonState(isSaved) {
 }
 
 // 更新收藏数量显示
-async function updateBookmarkCount() {
+async function updateBookmarkCount(forceRefresh = false) {
     try {
-        const allBookmarks = await getDisplayedBookmarks();
+        const allBookmarks = await getDisplayedBookmarks(forceRefresh);
         const count = Object.keys(allBookmarks).length;
         const bookmarkCount = document.getElementById('bookmark-count');
         bookmarkCount.setAttribute('data-count', count);
@@ -2116,9 +2132,20 @@ async function updateBookmarkCount() {
 
 // 保存当前渲染器实例的引用
 let currentRenderer = null;
+let refreshBookmarksInfoTimer = null;
+
+function scheduleRefreshBookmarksInfo() {
+    if (refreshBookmarksInfoTimer) {
+        clearTimeout(refreshBookmarksInfoTimer);
+    }
+    refreshBookmarksInfoTimer = setTimeout(async () => {
+        refreshBookmarksInfoTimer = null;
+        await refreshBookmarksInfo();
+    }, 0);
+}
 
 // 修改渲染书签列表函数
-async function renderBookmarksList() {
+async function renderBookmarksList(forceRefresh = false) {
     logger.debug('renderBookmarksList 开始');
     const bookmarksList = document.getElementById('bookmarks-list');
     if (!bookmarksList) return;
@@ -2149,10 +2176,11 @@ async function renderBookmarksList() {
         const viewMode = settings.display.viewMode;
         const sortBy = settings.sort.bookmarks;
 
-        // 层级视图和分组视图获取所有书签，列表视图使用筛选器
-        const data = (viewMode === 'group' || viewMode === 'hierarchy')
-            ? Object.values(await getDisplayedBookmarks())
-            : await filterManager.getFilteredBookmarks();
+        const allBookmarksMap = await getDisplayedBookmarks(forceRefresh);
+        const allBookmarks = Object.values(allBookmarksMap);
+        const data = viewMode === 'list'
+            ? await filterManager.getFilteredBookmarks(allBookmarks)
+            : allBookmarks;
 
         let bookmarks = data.map((item) => ({
                 ...item,
@@ -2257,10 +2285,10 @@ async function renderBookmarksList() {
     }
 }
 
-async function refreshBookmarksInfo() {
-    await renderBookmarksList();
+async function refreshBookmarksInfo(forceRefresh = false) {
+    await renderBookmarksList(forceRefresh);
     await Promise.all([
-        updateBookmarkCount(),
+        updateBookmarkCount(forceRefresh),
         updateTabState(),
         updateSearchResults(),
     ]);
@@ -2832,15 +2860,29 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
     /**
      * 初始化渲染器
      */
+    getRendererState() {
+        return {
+            rendererType: this.rendererType,
+            selectedTag: this.selectedTag,
+            expandedTags: Array.from(this.expandedTags),
+            treeWidth: this.config.treeWidth,
+            displayCount: this.displayCount
+        };
+    }
+
     async initialize(state = {}) {
         try {
+            await this.restoreRendererState(state);
+
             // 加载展开状态
-            const savedStates = await LocalStorageMgr.getHierarchyExpandedStates() || [];
-            this.expandedTags = new Set(savedStates);
+            if (this.expandedTags.size === 0) {
+                const savedStates = await LocalStorageMgr.getHierarchyExpandedStates() || [];
+                this.expandedTags = new Set(savedStates);
+            }
 
             // 加载保存的宽度
             const savedWidth = await LocalStorageMgr.getHierarchyTreeWidth();
-            if (savedWidth) {
+            if (savedWidth && !state.treeWidth) {
                 this.config.treeWidth = savedWidth;
             }
 
@@ -2853,16 +2895,32 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
             // 构建标签树
             this.buildTagHierarchy();
 
+            if (this.selectedTag && !this.availableTags.has(this.selectedTag) && !Array.from(this.availableTags).some(tag => tag.startsWith(this.selectedTag + '/'))) {
+                this.selectedTag = null;
+            }
+
             // 渲染标签树
             this.renderTagTree();
 
-            // 默认显示全部书签
-            this.selectTag(null);
+            // 恢复当前选中标签；如果目标已不存在则回到全部书签
+            this.selectTag(this.selectedTag || null);
 
         } catch (error) {
             logger.error('初始化层级视图失败:', error);
             throw error;
         }
+    }
+
+    async restoreRendererState(state) {
+        if (state.rendererType !== this.rendererType) {
+            return;
+        }
+        this.selectedTag = state.selectedTag || null;
+        this.expandedTags = new Set(state.expandedTags || []);
+        if (state.treeWidth) {
+            this.config.treeWidth = state.treeWidth;
+        }
+        this.displayCount = state.displayCount || 0;
     }
 
     /**
@@ -2968,24 +3026,23 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
         }
 
         this.bookmarks.forEach(bookmark => {
-            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            const tags = getBookmarkHierarchyTags(bookmark);
+            const countedPaths = new Set();
             tags.forEach(tag => {
                 if (!tag) return;
 
                 this.availableTags.add(tag);
-                this.tagCounts.set(tag, (this.tagCounts.get(tag) || 0) + 1);
 
-                // 为层级标签的每一级也计数
-                if (tag.includes('/')) {
-                    const parts = tag.split('/');
-                    let currentPath = '';
-                    parts.forEach((part, index) => {
-                        currentPath += (index > 0 ? '/' : '') + part;
-                        if (currentPath !== tag) {
-                            this.tagCounts.set(currentPath, (this.tagCounts.get(currentPath) || 0) + 1);
-                        }
-                    });
-                }
+                const parts = tag.split('/').map(part => part.trim()).filter(Boolean);
+                let currentPath = '';
+                parts.forEach((part, index) => {
+                    currentPath += (index > 0 ? '/' : '') + part;
+                    if (countedPaths.has(currentPath)) {
+                        return;
+                    }
+                    countedPaths.add(currentPath);
+                    this.tagCounts.set(currentPath, (this.tagCounts.get(currentPath) || 0) + 1);
+                });
             });
         });
 
@@ -3074,7 +3131,7 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
             }
 
             const affectedBookmarks = this.bookmarks.filter(bookmark => {
-                const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+                const tags = getBookmarkHierarchyTags(bookmark);
                 return tags.some(tag => tag === node.fullPath || tag.startsWith(node.fullPath + '/'));
             });
 
@@ -3109,6 +3166,10 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
                             }
                         }
 
+                        if (this.selectedTag === node.fullPath || this.selectedTag?.startsWith(node.fullPath + '/')) {
+                            this.selectedTag = null;
+                        }
+
                         await refreshBookmarksInfo();
                         updateStatus(`已删除 ${affectedBookmarks.length} 个书签`, false);
                     } catch (error) {
@@ -3136,7 +3197,8 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
         const input = document.createElement('input');
         input.className = 'tag-rename-input';
         input.type = 'text';
-        input.value = currentLabel;
+        input.value = node.fullPath;
+        input.title = node.fullPath;
 
         actionsElement.style.visibility = 'hidden';
         tagNameElement.replaceWith(input);
@@ -3154,19 +3216,24 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
         };
 
         const commit = async () => {
-            const newLabel = input.value.trim();
+            const newFullPath = input.value.trim().replace(/\/+/, '/');
             restore();
 
-            if (!newLabel || newLabel === currentLabel) {
+            if (!newFullPath || newFullPath === node.fullPath) {
                 return;
             }
 
-            if (newLabel.includes('/')) {
-                updateStatus('名称里不能包含 /', true);
+            if (newFullPath.startsWith('/') || newFullPath.endsWith('/')) {
+                updateStatus('路径开头和结尾不能是 /', true);
                 return;
             }
 
-            await this.renameTag(node, newLabel);
+            if (newFullPath.split('/').some(part => !part.trim())) {
+                updateStatus('路径中不能包含空层级', true);
+                return;
+            }
+
+            await this.renameTag(node, newFullPath);
         };
 
         input.addEventListener('blur', () => {
@@ -3187,18 +3254,19 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
     /**
      * 重命名标签并更新受影响书签
      */
-    async renameTag(node, newLabel) {
+    async renameTag(node, newFullPath) {
         const oldFullPath = node.fullPath;
-        const pathParts = oldFullPath.split('/');
-        pathParts[pathParts.length - 1] = newLabel;
-        const newFullPath = pathParts.join('/');
-        const parentPath = pathParts.slice(0, -1).join('/');
+        const normalizedNewFullPath = newFullPath.split('/').map(part => part.trim()).filter(Boolean).join('/');
+
+        if (!normalizedNewFullPath || normalizedNewFullPath === oldFullPath) {
+            return;
+        }
 
         const affectedBookmarks = this.bookmarks.filter(bookmark => {
             if (bookmark.source !== BookmarkSource.EXTENSION) {
                 return false;
             }
-            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            const tags = getBookmarkHierarchyTags(bookmark);
             return tags.some(tag => tag === oldFullPath || tag.startsWith(oldFullPath + '/'));
         });
 
@@ -3208,7 +3276,7 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
         }
 
         const bookmarkManager = getBookmarkManager();
-        const hasConflict = this.hasSiblingTagConflict(oldFullPath, newLabel);
+        const hasConflict = this.availableTags.has(normalizedNewFullPath) && normalizedNewFullPath !== oldFullPath;
 
         if (hasConflict) {
             if (!bookmarkManager || !bookmarkManager.alertDialog) {
@@ -3219,7 +3287,7 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
 
             bookmarkManager.alertDialog.show({
                 title: '合并标签',
-                message: `同一层级下已存在“${newLabel}”。要将“${oldFullPath}”合并到“${newFullPath}”吗？`,
+                message: `已存在路径“${normalizedNewFullPath}”。要将“${oldFullPath}”合并到“${normalizedNewFullPath}”吗？`,
                 primaryText: '合并',
                 secondaryText: '取消',
                 onPrimary: async () => {
@@ -3227,8 +3295,8 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
                         await this.applyTagRename(
                             affectedBookmarks,
                             oldFullPath,
-                            newFullPath,
-                            `已合并到“${newFullPath}”`
+                            normalizedNewFullPath,
+                            `已合并到“${normalizedNewFullPath}”`
                         );
                     } catch (error) {
                         logger.error('合并标签失败:', error);
@@ -3243,12 +3311,12 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
             await this.applyTagRename(
                 affectedBookmarks,
                 oldFullPath,
-                newFullPath,
-                `已重命名为“${newFullPath}”`
+                normalizedNewFullPath,
+                `已更新为“${normalizedNewFullPath}”`
             );
         } catch (error) {
             logger.error('重命名标签失败:', error);
-            updateStatus('重命名失败，请重试', true);
+            updateStatus('更新失败，请重试', true);
         }
     }
 
@@ -3256,34 +3324,7 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
      * 生成标签重命名或合并后的书签数据
      */
     buildUpdatedBookmarksForTagRename(affectedBookmarks, oldFullPath, newFullPath) {
-        return affectedBookmarks.map(bookmark => {
-            const nextTags = (bookmark.tags || []).map(tag => {
-                if (tag === oldFullPath) {
-                    return newFullPath;
-                }
-                if (tag.startsWith(oldFullPath + '/')) {
-                    return newFullPath + tag.slice(oldFullPath.length);
-                }
-                return tag;
-            });
-
-            const hierarchicalSource = bookmark.hierarchicalTags || bookmark.tags || [];
-            const nextHierarchicalTags = hierarchicalSource.map(tag => {
-                if (tag === oldFullPath) {
-                    return newFullPath;
-                }
-                if (tag.startsWith(oldFullPath + '/')) {
-                    return newFullPath + tag.slice(oldFullPath.length);
-                }
-                return tag;
-            });
-
-            return {
-                ...bookmark,
-                tags: Array.from(new Set(nextTags)),
-                hierarchicalTags: Array.from(new Set(nextHierarchicalTags))
-            };
-        });
+        return buildUpdatedBookmarksForPathRename(affectedBookmarks, oldFullPath, newFullPath);
     }
 
     /**
@@ -3291,8 +3332,8 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
      */
     async applyTagRename(affectedBookmarks, oldFullPath, newFullPath, successMessage) {
         const updatedBookmarks = this.buildUpdatedBookmarksForTagRename(affectedBookmarks, oldFullPath, newFullPath);
-        await updateBookmarksAndEmbedding(updatedBookmarks, { noUpdateEmbedding: true });
-        await refreshBookmarksInfo();
+        await updateBookmarksAndEmbedding(updatedBookmarks);
+        scheduleRefreshBookmarksInfo();
         updateStatus(successMessage, false);
     }
 
@@ -3362,10 +3403,10 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
 
         nodeElement.innerHTML = `
             ${expandBtn}
-            <span class="tag-name ${isSelected ? 'selected' : ''}">${label}</span>
-            ${this.config.showCount ? `<span class="tag-count">${node.count}</span>` : ''}
+            <span class="tag-name ${isSelected ? 'selected' : ''}" title="${node.fullPath}">${label}</span>
+            ${this.config.showCount ? `<span class="tag-count" title="${node.fullPath}">${node.count}</span>` : ''}
             <span class="tag-node-actions">
-                <button class="tag-action-btn tag-rename-btn" title="重命名标签" tabindex="-1">
+                <button class="tag-action-btn tag-rename-btn" title="编辑完整路径" tabindex="-1">
                     <svg viewBox="0 0 24 24" width="13" height="13">
                         <path fill="currentColor" d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
                     </svg>
@@ -3478,7 +3519,7 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
         } else {
             // 筛选包含该标签或其子标签的书签
             this.filteredBookmarks = this.bookmarks.filter(bookmark => {
-                const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+                const tags = getBookmarkHierarchyTags(bookmark);
                 return tags.some(tag =>
                     tag === tagPath || tag.startsWith(tagPath + '/')
                 );

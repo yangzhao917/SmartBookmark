@@ -3,6 +3,7 @@ importScripts('consts.js', 'common.js', 'env.js', 'logger.js', 'i18n.js', 'confi
      'util.js', 'api.js', 'search.js', 'customFilter.js', 'syncSettingManager.js', 'sync.js', 'webdavClient.js', 'webdavSync.js', 'autoSync.js');
 
 EnvIdentifier = 'background';
+let chromeFolderPathCache = new Map();
 // ------------------------------ 辅助函数分割线 ------------------------------
 // 更新页面状态（图标和按钮）
 async function updatePageState() {
@@ -44,14 +45,141 @@ async function initializeExtension() {
             SettingsManager.init(),
             SyncSettingsManager.init(),
         ]);
-        
+        chromeFolderPathCache = await buildChromeFolderPathCache();
+
         // 初始化自动同步系统
         await AutoSyncManager.initialize();
-        
+
         logger.info("扩展初始化完成");
     } catch (error) {
         logger.error("扩展初始化失败:", error);
     }
+}
+
+async function buildChromeFolderPathCache() {
+    const cache = new Map();
+
+    try {
+        const tree = await chrome.bookmarks.getTree();
+        const walk = (nodes, parentPath = []) => {
+            nodes.forEach(node => {
+                if (!node.url) {
+                    const currentPath = node.title && node.id !== '0' && node.parentId !== '0'
+                        ? [...parentPath, node.title]
+                        : [...parentPath];
+                    cache.set(node.id, currentPath.join('/'));
+                    if (node.children) {
+                        walk(node.children, currentPath);
+                    }
+                }
+            });
+        };
+        walk(tree);
+    } catch (error) {
+        logger.error('初始化Chrome文件夹路径缓存失败:', error);
+    }
+
+    return cache;
+}
+
+async function syncImportedBookmarksForChromeFolderChange(folderId, oldFullPath) {
+    const folderNode = await getChromeBookmarkNode(folderId);
+    if (!folderNode || folderNode.url) {
+        return false;
+    }
+
+    const newFullPath = await getChromeFolderPathById(folderId);
+    chromeFolderPathCache.set(folderId, newFullPath || '');
+
+    if (!oldFullPath || !newFullPath || oldFullPath === newFullPath) {
+        return false;
+    }
+
+    const affectedUrls = await getChromeDescendantUrls(folderId);
+    if (affectedUrls.length === 0) {
+        return false;
+    }
+
+    const localBookmarks = await LocalStorageMgr.getBookmarks();
+    const affectedBookmarks = Object.values(localBookmarks)
+        .filter(bookmark => bookmark.importedFromChrome && affectedUrls.includes(bookmark.url))
+        .map(bookmark => new UnifiedBookmark(bookmark, BookmarkSource.EXTENSION));
+
+    if (affectedBookmarks.length === 0) {
+        return false;
+    }
+
+    const updatedBookmarks = buildUpdatedBookmarksForPathRename(affectedBookmarks, oldFullPath, newFullPath);
+    await LocalStorageMgr.updateBookmarksAndEmbedding(
+        updatedBookmarks.map(bookmark => unifiedBookmarkToLocalFormat(bookmark))
+    );
+
+    sendMessageSafely({
+        type: MessageType.BOOKMARKS_UPDATED,
+        source: 'chrome_folder_rename_sync'
+    });
+
+    return true;
+}
+
+async function syncImportedBookmarkForChromeNodeMove(bookmarkId) {
+    const bookmarkNode = await getChromeBookmarkNode(bookmarkId);
+    if (!bookmarkNode || !bookmarkNode.url) {
+        return false;
+    }
+
+    const localBookmarks = await LocalStorageMgr.getBookmarks();
+    const importedBookmark = Object.values(localBookmarks).find(bookmark => {
+        return bookmark.importedFromChrome
+            && bookmark.url === bookmarkNode.url
+            && String(bookmark.importMeta?.chromeId || '') === String(bookmarkId);
+    });
+
+    if (!importedBookmark) {
+        return false;
+    }
+
+    if (!shouldSyncImportedFolderTags(importedBookmark)) {
+        return false;
+    }
+
+    const folderPath = await getChromeFolderPathById(bookmarkNode.parentId);
+    const folderParts = splitTagPath(folderPath);
+    let currentPath = '';
+    const folderHierarchicalTags = folderParts.map(part => {
+        currentPath = currentPath ? `${currentPath}/${part}` : part;
+        return currentPath;
+    });
+    const oldFolderHierarchicalTags = getImportedFolderHierarchicalTags(importedBookmark);
+    const preservedHierarchicalTags = normalizeHierarchicalTags((importedBookmark.hierarchicalTags || []).filter(tag => !oldFolderHierarchicalTags.includes(tag)));
+    const nextHierarchicalTags = normalizeHierarchicalTags([
+        ...preservedHierarchicalTags,
+        ...(folderHierarchicalTags.length > 0 ? [folderHierarchicalTags[folderHierarchicalTags.length - 1]] : [])
+    ]);
+    const oldFolderParts = getImportedFolderFlatTags(importedBookmark, importedBookmark.importMeta?.folderPath || '');
+    const nextFlatTags = new Set(extractFlatTags(nextHierarchicalTags));
+    const preservedTags = (importedBookmark.tags || []).filter(tag => !oldFolderParts.includes(tag));
+    const updatedBookmark = {
+        ...importedBookmark,
+        tags: Array.from(new Set([...preservedTags, ...nextFlatTags])),
+        hierarchicalTags: nextHierarchicalTags,
+        importMeta: {
+            ...(importedBookmark.importMeta || {}),
+            parentFolderTitles: folderParts,
+            folderPath: folderPath || '',
+            folderHierarchicalTags,
+            folderFlatTags: extractFlatTags(folderHierarchicalTags)
+        },
+        embedding: null
+    };
+
+    await LocalStorageMgr.updateBookmarksAndEmbedding([updatedBookmark]);
+    sendMessageSafely({
+        type: MessageType.BOOKMARKS_UPDATED,
+        source: 'chrome_bookmark_move_sync'
+    });
+
+    return true;
 }
 
 // ------------------------------ 事件监听分割线 ------------------------------
@@ -468,6 +596,16 @@ chrome.bookmarks.onChanged.addListener(async (id, changeInfo, bookmark) => {
         changeInfo: changeInfo,
         bookmark: bookmark,
     });
+
+    try {
+        const oldFullPath = chromeFolderPathCache.get(id);
+        const changed = await syncImportedBookmarksForChromeFolderChange(id, oldFullPath);
+        if (changed) {
+            chromeFolderPathCache = await buildChromeFolderPathCache();
+        }
+    } catch (error) {
+        logger.error('同步Chrome文件夹重命名失败:', { id, error });
+    }
 });
 
 // 监听书签创建事件
@@ -476,6 +614,10 @@ chrome.bookmarks.onCreated.addListener(async (id, bookmark) => {
         id: id,
         bookmark: bookmark,
     });
+
+    if (!bookmark.url) {
+        chromeFolderPathCache = await buildChromeFolderPathCache();
+    }
 });
 
 // 监听书签删除事件
@@ -484,6 +626,11 @@ chrome.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
         id: id,
         removeInfo: removeInfo,
     });
+
+    chromeFolderPathCache.delete(id);
+    if (removeInfo && removeInfo.node && removeInfo.node.children) {
+        chromeFolderPathCache = await buildChromeFolderPathCache();
+    }
 });
 
 // 监听书签移动事件
@@ -492,4 +639,22 @@ chrome.bookmarks.onMoved.addListener(async (id, moveInfo) => {
         id: id,
         moveInfo: moveInfo,
     });
+
+    try {
+        const oldFullPath = chromeFolderPathCache.get(id);
+        let changed = await syncImportedBookmarksForChromeFolderChange(id, oldFullPath);
+        if (!changed) {
+            changed = await syncImportedBookmarkForChromeNodeMove(id);
+        }
+        chromeFolderPathCache = await buildChromeFolderPathCache();
+        if (!changed) {
+            const movedNode = await getChromeBookmarkNode(id);
+            if (movedNode && !movedNode.url) {
+                chromeFolderPathCache.set(id, await getChromeFolderPathById(id) || '');
+            }
+        }
+    } catch (error) {
+        logger.error('同步Chrome文件夹移动失败:', { id, error });
+        chromeFolderPathCache = await buildChromeFolderPathCache();
+    }
 });
