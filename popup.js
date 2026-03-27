@@ -2968,7 +2968,7 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
         }
 
         this.bookmarks.forEach(bookmark => {
-            const tags = bookmark.tags || [];
+            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
             tags.forEach(tag => {
                 if (!tag) return;
 
@@ -3021,8 +3021,281 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
     }
 
     /**
+     * 获取指定父路径下的子节点映射
+     */
+    getTagChildrenMap(parentPath) {
+        if (!parentPath) {
+            return this.tagHierarchy || {};
+        }
+
+        const parts = parentPath.split('/').filter(Boolean);
+        let currentLevel = this.tagHierarchy || {};
+
+        for (const part of parts) {
+            const currentNode = currentLevel[part];
+            if (!currentNode) {
+                return {};
+            }
+            currentLevel = currentNode.children || {};
+        }
+
+        return currentLevel;
+    }
+
+    /**
+     * 判断同父级下是否已存在同名标签节点
+     */
+    hasSiblingTagConflict(oldFullPath, newLabel) {
+        const pathParts = oldFullPath.split('/');
+        const currentLabel = pathParts[pathParts.length - 1];
+        const parentPath = pathParts.slice(0, -1).join('/');
+
+        if (newLabel === currentLabel) {
+            return false;
+        }
+
+        const siblingsMap = this.getTagChildrenMap(parentPath);
+        const siblingNode = siblingsMap[newLabel];
+        return Boolean(siblingNode && siblingNode.fullPath !== oldFullPath);
+    }
+
+    /**
      * 渲染标签树
      */
+    /**
+     * 删除标签及其子标签下的所有书签
+     */
+    async deleteTagGroup(node) {
+        try {
+            const bookmarkManager = getBookmarkManager();
+            if (!bookmarkManager || !bookmarkManager.alertDialog) {
+                logger.error('获取 AlertDialog 失败');
+                return;
+            }
+
+            const affectedBookmarks = this.bookmarks.filter(bookmark => {
+                const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+                return tags.some(tag => tag === node.fullPath || tag.startsWith(node.fullPath + '/'));
+            });
+
+            if (affectedBookmarks.length === 0) {
+                updateStatus('这个标签下还没有书签', false);
+                return;
+            }
+
+            bookmarkManager.alertDialog.show({
+                title: '删除标签',
+                message: `删除后，“${node.fullPath}”及其子标签下的 ${affectedBookmarks.length} 个书签都会被移除。是否继续？`,
+                primaryText: '删除',
+                secondaryText: '取消',
+                onPrimary: async () => {
+                    try {
+                        const extensionUrls = affectedBookmarks
+                            .filter(bookmark => bookmark.source === BookmarkSource.EXTENSION)
+                            .map(bookmark => bookmark.url);
+
+                        const chromeBookmarks = affectedBookmarks
+                            .filter(bookmark => bookmark.source === BookmarkSource.CHROME);
+
+                        if (extensionUrls.length > 0) {
+                            await LocalStorageMgr.removeBookmarks(extensionUrls);
+                        }
+
+                        for (const bookmark of chromeBookmarks) {
+                            try {
+                                await chrome.bookmarks.remove(bookmark.chromeId);
+                            } catch (error) {
+                                logger.warn('删除 Chrome 书签失败:', { chromeId: bookmark.chromeId, error });
+                            }
+                        }
+
+                        await refreshBookmarksInfo();
+                        updateStatus(`已删除 ${affectedBookmarks.length} 个书签`, false);
+                    } catch (error) {
+                        logger.error('删除标签书签失败:', error);
+                        updateStatus('删除失败，请重试', true);
+                    }
+                }
+            });
+        } catch (error) {
+            logger.error('删除标签组时出错:', error);
+            updateStatus('删除失败，请重试', true);
+        }
+    }
+
+    /**
+     * 开始内联重命名标签
+     */
+    startInlineRename(node, currentLabel, nodeElement) {
+        const tagNameElement = nodeElement.querySelector('.tag-name');
+        const actionsElement = nodeElement.querySelector('.tag-node-actions');
+        if (!tagNameElement || !actionsElement) {
+            return;
+        }
+
+        const input = document.createElement('input');
+        input.className = 'tag-rename-input';
+        input.type = 'text';
+        input.value = currentLabel;
+
+        actionsElement.style.visibility = 'hidden';
+        tagNameElement.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let isRestored = false;
+        const restore = () => {
+            if (isRestored || !input.isConnected) {
+                return;
+            }
+            isRestored = true;
+            input.replaceWith(tagNameElement);
+            actionsElement.style.visibility = '';
+        };
+
+        const commit = async () => {
+            const newLabel = input.value.trim();
+            restore();
+
+            if (!newLabel || newLabel === currentLabel) {
+                return;
+            }
+
+            if (newLabel.includes('/')) {
+                updateStatus('名称里不能包含 /', true);
+                return;
+            }
+
+            await this.renameTag(node, newLabel);
+        };
+
+        input.addEventListener('blur', () => {
+            commit();
+        }, { once: true });
+
+        input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                input.blur();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                restore();
+            }
+        });
+    }
+
+    /**
+     * 重命名标签并更新受影响书签
+     */
+    async renameTag(node, newLabel) {
+        const oldFullPath = node.fullPath;
+        const pathParts = oldFullPath.split('/');
+        pathParts[pathParts.length - 1] = newLabel;
+        const newFullPath = pathParts.join('/');
+        const parentPath = pathParts.slice(0, -1).join('/');
+
+        const affectedBookmarks = this.bookmarks.filter(bookmark => {
+            if (bookmark.source !== BookmarkSource.EXTENSION) {
+                return false;
+            }
+            const tags = bookmark.hierarchicalTags || bookmark.tags || [];
+            return tags.some(tag => tag === oldFullPath || tag.startsWith(oldFullPath + '/'));
+        });
+
+        if (affectedBookmarks.length === 0) {
+            updateStatus('没有可更新的书签', false);
+            return;
+        }
+
+        const bookmarkManager = getBookmarkManager();
+        const hasConflict = this.hasSiblingTagConflict(oldFullPath, newLabel);
+
+        if (hasConflict) {
+            if (!bookmarkManager || !bookmarkManager.alertDialog) {
+                logger.error('获取 AlertDialog 失败');
+                updateStatus('检测到重名，但当前无法发起确认', true);
+                return;
+            }
+
+            bookmarkManager.alertDialog.show({
+                title: '合并标签',
+                message: `同一层级下已存在“${newLabel}”。要将“${oldFullPath}”合并到“${newFullPath}”吗？`,
+                primaryText: '合并',
+                secondaryText: '取消',
+                onPrimary: async () => {
+                    try {
+                        await this.applyTagRename(
+                            affectedBookmarks,
+                            oldFullPath,
+                            newFullPath,
+                            `已合并到“${newFullPath}”`
+                        );
+                    } catch (error) {
+                        logger.error('合并标签失败:', error);
+                        updateStatus('合并失败，请重试', true);
+                    }
+                }
+            });
+            return;
+        }
+
+        try {
+            await this.applyTagRename(
+                affectedBookmarks,
+                oldFullPath,
+                newFullPath,
+                `已重命名为“${newFullPath}”`
+            );
+        } catch (error) {
+            logger.error('重命名标签失败:', error);
+            updateStatus('重命名失败，请重试', true);
+        }
+    }
+
+    /**
+     * 生成标签重命名或合并后的书签数据
+     */
+    buildUpdatedBookmarksForTagRename(affectedBookmarks, oldFullPath, newFullPath) {
+        return affectedBookmarks.map(bookmark => {
+            const nextTags = (bookmark.tags || []).map(tag => {
+                if (tag === oldFullPath) {
+                    return newFullPath;
+                }
+                if (tag.startsWith(oldFullPath + '/')) {
+                    return newFullPath + tag.slice(oldFullPath.length);
+                }
+                return tag;
+            });
+
+            const hierarchicalSource = bookmark.hierarchicalTags || bookmark.tags || [];
+            const nextHierarchicalTags = hierarchicalSource.map(tag => {
+                if (tag === oldFullPath) {
+                    return newFullPath;
+                }
+                if (tag.startsWith(oldFullPath + '/')) {
+                    return newFullPath + tag.slice(oldFullPath.length);
+                }
+                return tag;
+            });
+
+            return {
+                ...bookmark,
+                tags: Array.from(new Set(nextTags)),
+                hierarchicalTags: Array.from(new Set(nextHierarchicalTags))
+            };
+        });
+    }
+
+    /**
+     * 持久化标签重命名或合并结果
+     */
+    async applyTagRename(affectedBookmarks, oldFullPath, newFullPath, successMessage) {
+        const updatedBookmarks = this.buildUpdatedBookmarksForTagRename(affectedBookmarks, oldFullPath, newFullPath);
+        await updateBookmarksAndEmbedding(updatedBookmarks, { noUpdateEmbedding: true });
+        await refreshBookmarksInfo();
+        updateStatus(successMessage, false);
+    }
+
     renderTagTree() {
         this.tagTreeContainer.innerHTML = '';
 
@@ -3091,6 +3364,18 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
             ${expandBtn}
             <span class="tag-name ${isSelected ? 'selected' : ''}">${label}</span>
             ${this.config.showCount ? `<span class="tag-count">${node.count}</span>` : ''}
+            <span class="tag-node-actions">
+                <button class="tag-action-btn tag-rename-btn" title="重命名标签" tabindex="-1">
+                    <svg viewBox="0 0 24 24" width="13" height="13">
+                        <path fill="currentColor" d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+                    </svg>
+                </button>
+                <button class="tag-action-btn tag-delete-btn" title="删除标签下所有书签" tabindex="-1">
+                    <svg viewBox="0 0 24 24" width="13" height="13">
+                        <path fill="currentColor" d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+                    </svg>
+                </button>
+            </span>
         `;
 
         // 展开/折叠按钮点击事件
@@ -3120,6 +3405,22 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
         tagNameElement.addEventListener('click', () => {
             this.selectTag(node.fullPath);
         });
+
+        const renameBtnElement = nodeElement.querySelector('.tag-rename-btn');
+        if (renameBtnElement) {
+            renameBtnElement.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.startInlineRename(node, label, nodeElement);
+            });
+        }
+
+        const deleteBtnElement = nodeElement.querySelector('.tag-delete-btn');
+        if (deleteBtnElement) {
+            deleteBtnElement.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.deleteTagGroup(node);
+            });
+        }
 
         container.appendChild(nodeElement);
 
@@ -3177,7 +3478,7 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
         } else {
             // 筛选包含该标签或其子标签的书签
             this.filteredBookmarks = this.bookmarks.filter(bookmark => {
-                const tags = bookmark.tags || [];
+                const tags = bookmark.hierarchicalTags || bookmark.tags || [];
                 return tags.some(tag =>
                     tag === tagPath || tag.startsWith(tagPath + '/')
                 );
