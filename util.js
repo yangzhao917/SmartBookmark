@@ -436,19 +436,34 @@ function shouldSyncImportedFolderTags(bookmark) {
 
 function buildUpdatedBookmarksForPathRename(affectedBookmarks, oldFullPath, newFullPath) {
     return affectedBookmarks.map(bookmark => {
+        const currentHierarchicalTags = getEffectiveHierarchicalTags(bookmark);
+        const nextHierarchicalTagsForBookmark = normalizeHierarchicalTags(
+            replaceTagPathPrefix(currentHierarchicalTags, oldFullPath, newFullPath)
+        );
+        const oldFullPathParts = splitTagPath(oldFullPath);
+        const nextFlatTagsForBookmark = extractFlatTags(nextHierarchicalTagsForBookmark);
+        const preservedFlatTags = (bookmark.tags || []).filter(tag => !oldFullPathParts.includes(tag));
+        const updatedBookmark = {
+            ...bookmark,
+            tags: Array.from(new Set([
+                ...preservedFlatTags,
+                ...nextFlatTagsForBookmark
+            ])),
+            hierarchicalTags: nextHierarchicalTagsForBookmark,
+            embedding: null
+        };
+
         if (!shouldSyncImportedFolderTags(bookmark)) {
-            return bookmark;
+            return updatedBookmark;
         }
 
         const folderHierarchicalTags = getImportedFolderHierarchicalTags(bookmark);
-        const nextFolderHierarchicalTags = normalizeHierarchicalTags(replaceTagPathPrefix(folderHierarchicalTags, oldFullPath, newFullPath));
-        const oldFolderFlatTags = getImportedFolderFlatTags(bookmark, oldFullPath);
+        const nextFolderHierarchicalTags = normalizeHierarchicalTags(
+            replaceTagPathPrefix(folderHierarchicalTags, oldFullPath, newFullPath)
+        );
         const nextFolderFlatTags = extractFlatTags(nextFolderHierarchicalTags);
-        const preservedHierarchicalTags = normalizeHierarchicalTags((bookmark.hierarchicalTags || []).filter(tag => !folderHierarchicalTags.includes(tag)));
-        const nextHierarchicalTags = normalizeHierarchicalTags([...preservedHierarchicalTags, ...nextFolderHierarchicalTags]);
-        const preservedTags = (bookmark.tags || []).filter(tag => !oldFolderFlatTags.includes(tag));
-        const nextTags = Array.from(new Set([...preservedTags, ...nextFolderFlatTags]));
-        const nextImportMeta = {
+
+        updatedBookmark.importMeta = {
             ...(bookmark.importMeta || {}),
             parentFolderTitles: splitTagPath(newFullPath),
             folderPath: newFullPath,
@@ -456,13 +471,7 @@ function buildUpdatedBookmarksForPathRename(affectedBookmarks, oldFullPath, newF
             folderFlatTags: nextFolderFlatTags
         };
 
-        return {
-            ...bookmark,
-            tags: nextTags,
-            hierarchicalTags: nextHierarchicalTags,
-            importMeta: nextImportMeta,
-            embedding: null
-        };
+        return updatedBookmark;
     });
 }
 

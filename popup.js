@@ -3333,6 +3333,11 @@ class HierarchicalBookmarkRenderer extends BookmarkRenderer {
     async applyTagRename(affectedBookmarks, oldFullPath, newFullPath, successMessage) {
         const updatedBookmarks = this.buildUpdatedBookmarksForTagRename(affectedBookmarks, oldFullPath, newFullPath);
         await updateBookmarksAndEmbedding(updatedBookmarks);
+        if (this.selectedTag === oldFullPath) {
+            this.selectedTag = newFullPath;
+        } else if (this.selectedTag?.startsWith(oldFullPath + '/')) {
+            this.selectedTag = newFullPath + this.selectedTag.slice(oldFullPath.length);
+        }
         scheduleRefreshBookmarksInfo();
         updateStatus(successMessage, false);
     }
