@@ -1,263 +1,410 @@
 <div align="center">
 
-# Smart Bookmark
+# 🔖 Smart Bookmark
 
-一个帮你把书签重新变得“找得到、理得清、愿意继续存”的浏览器扩展。
-
-把“收藏了但找不回来”的网页，重新变成可搜索、可整理、可积累的个人资料库。
+**AI-Powered Intelligent Bookmark Manager for Chrome & Edge**
 
 [![Version](https://img.shields.io/badge/version-1.2.5-blue.svg)](https://github.com/howoii/SmartBookmark/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Chrome Web Store](https://img.shields.io/badge/Chrome-Web%20Store-orange.svg)](https://chromewebstore.google.com/detail/smart-bookmark/nlboajobccgidfcdoedphgfaklelifoa)
 [![Edge Add-ons](https://img.shields.io/badge/Edge-Add--ons-0078D7.svg)](https://microsoftedge.microsoft.com/addons/detail/smart-bookmark/dohicooegjedllghbfapbmbhjopnkbad)
 
-[安装](#安装) · [快速开始](#快速开始) · [开发](#开发) · [常见问题](#常见问题)
-
-[立即安装 Chrome 版](https://chromewebstore.google.com/detail/smart-bookmark/nlboajobccgidfcdoedphgfaklelifoa) · [立即安装 Edge 版](https://microsoftedge.microsoft.com/addons/detail/smart-bookmark/dohicooegjedllghbfapbmbhjopnkbad) · [反馈问题](https://github.com/howoii/SmartBookmark/issues)
+[安装插件](#-快速开始) · [功能介绍](#-功能特性) · [技术架构](#-技术架构) · [核心业务流程](#-核心业务流程) · [开发指南](#-开发指南) · [贡献指南](#-贡献指南) · [FAQ](#-faq)
 
 </div>
 
-> 适合“收藏很多网页，但真正需要时总是找不回来”的人。
+---
 
-## 这个项目解决什么问题
+## 📖 项目简介
 
-很多书签工具的问题，不是“存不进去”，而是“以后找不回来”。
+Smart Bookmark 是一个基于 Chrome/Edge 扩展的智能书签管理插件，设计目标是让书签收藏、搜索和跨设备同步更加智能、轻量和可维护。
 
-Smart Bookmark 主要解决这几件事：
+扩展核心能力包括：AI 自动标签与摘要生成、语义化书签搜索、层级标签结构、WebDAV 同步、以及轻量本地存储策略。
 
-- 收藏之后很快忘记标题，只记得内容
-- 书签越存越多，文件夹越分越乱
-- 想以后再整理，结果一直没整理
-- 已经在 Chrome 里存了很多书签，但很难继续维护
-- 想多端同步，但又不想完全依赖第三方平台
+---
 
-## 为什么值得用
+## ✨ 功能特性
 
-- `🔎` 按内容找书签，而不只是按标题找书签
-- `🗂️` 先保存、后整理，不用一开始就把分类想得很完整
-- `📥` 把 Chrome 里已经积累的书签继续用起来，而不是从零开始
-- `🌲` 用层级标签替代越来越难维护的文件夹结构
-- `☁️` 支持 WebDAV 同步，在多设备之间保留自己的数据控制权
+### 🎯 核心功能
 
-## 对 AI 时代的帮助
+- **AI 自动标签生成**：收藏网页时自动生成语义标签，减少手动分类成本
+- **语义搜索**：基于向量嵌入的语义搜索，支持自然语言查询
+- **AI 生成摘要**：自动为书签生成摘要，快速预览页面内容
+- **多级标签与层级展示**：支持层级标签树、智能归类和标签筛选
+- **WebDAV 同步**：支持用户自定义 WebDAV 服务器，实现跨设备书签同步
+- **快捷键支持**：`Ctrl/Cmd + K` 为快速搜索，`Ctrl/Cmd + B` 为快速收藏
+- **本地数据存储**：书签和缓存信息存储于浏览器本地，保护用户隐私
 
-AI 时代的问题，不再只是“信息太少”，而是“信息太多，真正需要时找不到”。
+### 🛠️ 高级功能
 
-- `📚` 看到的信息越来越多，但真正有价值的内容很容易被淹没
-- `🧠` 你常常记得问题和思路，却记不住当时收藏的标题
-- `🤖` 你会反复向 AI 提问、找资料、比对方案，所以更需要一个长期可回查的资料入口
+- 层级书签展示视图（树形结构、标签筛选、拖拽宽度调整）
+- 自定义筛选规则与过滤器
+- 批量选择、编辑与删除书签
+- 书签导入与导出
+- 多 AI 服务支持：OpenAI、通义千问、智谱 GLM、Ollama、本地自定义 API
+- 支持浅色/深色主题
 
-它不是替代 AI，而是帮你把“看过的内容”和“以后还会用到的资料”留下来，让搜索、回查和个人积累更顺畅。
+---
 
-## 产品截图
+## 📸 截图演示
 
-### 主界面：书签库与标签树
+<div align="center">
 
-左侧看标签结构，右侧看书签列表，适合回看和整理已经存下来的资料。
+### 语义搜索
+![语义搜索](pic/view-3.png)
 
-![书签库与标签树](pic/tree.png)
+### 主界面
+![主界面](pic/view-4.png)
 
-### 搜索：按内容快速找回
+### AI 标签生成
+![AI 标签生成](pic/view-5.png)
 
-当你只记得一个主题、一个关键词，或者一个大概的问题时，可以直接搜索，不必先想起原来的标题。
+</div>
 
-![搜索：按内容快速找回](pic/search.png)
+---
 
-### 筛选：快速缩小范围
+## 🏗️ 技术架构
 
-按标签层级快速缩小范围，比一层层翻文件夹更高效。
+Smart Bookmark 基于 Chrome 扩展 Manifest V3 架构设计，主流程使用 Service Worker 作为后台入口，前端通过 Popup、Side Panel、设置页和内容脚本与后台通信。
 
-![标签筛选](pic/tree_filter.png)
+### 技术架构图
 
-### 设置：常用选项集中管理
+```mermaid
+graph TD
+  User[用户]
+  QuickSave[快速收藏 Popup<br/>quickSave.html]
+  SidePanel[侧边栏主界面<br/>popup.html]
+  QuickSearch[快速搜索<br/>quickSearch.html]
+  Settings[设置页面<br/>settings.html]
+  Background[Service Worker<br/>background.js]
+  ContentScript[Content Script<br/>versionCheck.js]
+  Storage[本地存储<br/>chrome.storage.local]
+  AI[AI 服务层<br/>api.js]
+  Sync[同步层<br/>autoSync.js / webdavSync.js]
+  Search[搜索引擎<br/>search.js]
+  Model[数据模型与常量<br/>models.js / consts.js]
 
-常用配置集中放在设置面板里，适合快速打开或关闭浏览器书签显示、主题和隐私相关选项。
+  User -->|打开插件| QuickSave
+  User -->|打开侧边栏| SidePanel
+  User -->|快捷键| QuickSearch
+  User -->|打开设置| Settings
+  QuickSave -->|消息| Background
+  SidePanel -->|消息| Background
+  QuickSearch -->|消息| Background
+  Settings -->|消息| Background
+  Background -->|读写| Storage
+  Background -->|请求标签/摘要/嵌入| AI
+  Background -->|调度同步| Sync
+  QuickSearch -->|搜索逻辑| Search
+  Search -->|访问书签| Storage
+  Search -->|获取向量| AI
+  Background -->|数据模型| Model
+```
 
-![设置面板](pic/setting.png)
+### 模块职责说明
 
-### 基本设置：快捷键、主题和搜索偏好
+- `manifest.json`：扩展入口、权限、快捷键、侧边栏与选项页配置
+- `background.js`：Service Worker，负责消息分发、存储访问、同步调度与全局运行时逻辑
+- `api.js`：AI 接口层，封装多种 AI 服务、Embedding 请求、标签/摘要生成逻辑
+- `storageManager.js`：封装 Chrome Storage 读写、书签缓存、增删改查与变更通知
+- `search.js`：语义搜索与关键词匹配，负责计算相似度、结果评分与排序
+- `autoSync.js`：自动同步调度与闹钟管理
+- `webdavSync.js`：WebDAV 同步实现层
+- `settingsManager.js` / `syncSettingManager.js`：配置读取、验证与持久化
+- `models.js`：书签数据模型定义、版本字段与兼容性处理
+- `consts.js`：消息类型、默认参数与功能开关
+- `logger.js`：统一日志输出接口
+- `i18n.js`：国际化文本支持
+- `build.py` / `build.sh`：打包与发布辅助脚本
 
-你可以在基本设置里调整快捷键、主题模式和搜索相关参数，按自己的使用习惯去定制日常体验。
+---
 
-![基本设置](pic/base_setting.png)
+## 🧩 核心业务流程
 
-### API 服务：启用智能标签和内容搜索
+### 1. 书签保存流程
 
-如果你想使用智能标签、摘要和更强的内容搜索能力，可以在这里配置 AI 服务。
+```mermaid
+flowchart TD
+  A[用户点击收藏 / Ctrl+B]
+  B[quickSave.html / quickSave.js]
+  C[background.js]
+  D[api.js: 标签 + 摘要 + Embedding]
+  E[storageManager.js]
+  F[autoSync.js / webdavSync.js]
+  G[chrome.storage.local]
 
-![API 服务](pic/api_service.png)
+  A --> B
+  B --> C
+  C --> D
+  D --> E
+  E --> G
+  E --> C
+  C -->|通知更新| B
+  E --> F
+  F -->|同步数据| G
+```
 
-### 同步：把数据保留在自己的同步方式里
+### 2. 语义搜索流程
 
-如果你希望多设备保持一致，可以通过 WebDAV 同步书签和个性化设置。
+```mermaid
+flowchart TD
+  U[用户输入搜索词]
+  S[quickSearch.html / search.js]
+  V[searchHistoryManager]
+  W[api.js 获取查询向量]
+  B[storageManager.js 本地书签]
+  R[search.js 计算相似度]
+  O[展示搜索结果]
 
-![同步设置](pic/sync.png)
+  U --> S
+  S --> V
+  V -->|若无缓存| W
+  W --> R
+  B --> R
+  R --> O
+```
 
-## 适合谁
+### 3. WebDAV 同步流程
 
-- `📘` 经常收藏文档、教程、博客、研究资料的人
-- `🧾` 收藏很多“以后再看”，但书签已经失控的人
-- `💭` 记得内容、不记得标题的人
-- `🔐` 希望保留自己数据控制权的人
+```mermaid
+flowchart TD
+  T[Chrome Alarm 定时触发]
+  A[autoSync.js]
+  C[syncSettingManager.js]
+  W[webdavSync.js]
+  L[chrome.storage.local]
+  B[background.js]
 
-## 不适合谁
+  T --> A
+  A --> C
+  C --> W
+  W --> L
+  L --> B
+  B -->|通知 UI 更新| QuickSave
+```
 
-- 只偶尔收藏几个网页，基本不会回头找的人
-- 只想要最简单收藏功能，不需要后续整理和搜索增强的人
-- 不关心资料积累，也不需要长期回查的人
+---
 
-## 快速开始
+## 📁 代码目录说明
 
-### 使用扩展
+### 主要入口
 
-1. 安装扩展
-2. 打开设置页，配置 AI 服务
-3. 按 `Ctrl/Cmd + B` 保存当前页面
-4. 按 `Ctrl/Cmd + K` 搜索已保存内容
+- `quickSave.html` / `quickSave.js`：快速收藏弹窗
+- `popup.html` / `popup.js`：侧边栏主界面
+- `quickSearch.html` / `quickSearch.js`：快速搜索弹窗
+- `settings.html` / `settings.js`：设置页面
+- `intro.html` / `intro.js`：新用户引导页面
 
-如果你只是想先体验，不需要一开始就把所有功能都配好。先试保存和搜索，确认适合自己的使用方式后，再决定要不要启用 AI 和同步。
+### 核心运行时
 
-第一次使用，建议先体验这两点：
+- `background.js`：Service Worker 执行入口
+- `contentScript.js`：页面脚本注入（本项目当前仅用于本地测试域名）
+- `versionCheck.js`：版本检查脚本
 
-- `⌘/Ctrl + B` 快速保存：看看它能不能减少你保存网页时的整理负担
-- `⌘/Ctrl + K` 内容搜索：看看它能不能比传统书签搜索更容易帮你找回资料
+### 主要服务层
 
-快速保存时，你可以直接看到标题、摘要和推荐标签，不用自己从零开始整理。
+- `api.js`：AI 服务适配、Embedding 调用、标签与摘要生成
+- `storageManager.js`：数据存储、书签 CRUD、缓存策略、消息通知
+- `search.js`：搜索逻辑、向量相似度、关键词排序
+- `autoSync.js`：自动同步调度、定时闹钟管理
+- `webdavClient.js` / `webdavSync.js`：WebDAV 请求与数据同步实现
+- `settingsManager.js` / `syncSettingManager.js`：配置读取、验证和同步
+- `models.js`：统一书签数据模型定义
+- `consts.js`：核心常量与功能开关定义
+- `logger.js`：日志封装
+- `i18n.js`：国际化文本支持
+- `util.js`：公共工具函数
+- `config.js` / `env.json`：本地环境与 API Key 配置
+- `build.py` / `build.sh`：构建与打包脚本
 
-![快速保存](pic/quick_save_2.png)
+---
 
-如果你愿意，也可以继续调整推荐标签，再决定最终保存什么内容。
+## 🚀 快速开始
 
-![快速保存并调整标签](pic/quick_save.png)
+### 安装扩展
 
-### 一个典型使用流程
-
-1. 看到一篇以后可能会用到的文章，先按快捷键保存下来。
-2. 扩展自动补标签和摘要，帮你减少当下的整理负担。
-3. 过几天再找资料时，直接按你记得的主题或问题搜索。
-4. 当同类资料越来越多时，再用标签树慢慢整理，而不是一开始就搭复杂文件夹。
-
-### 导入浏览器书签
-
-如果你已经在 Chrome 里存了很多书签，可以直接导入继续管理。
-
-导入时可以选择：
-
-- 是否保留文件夹路径标签
-- 是否智能生成标签
-- 是否跳过已导入的书签
-
-导入后，扩展会保存自己的书签数据，不会改动你原来的 Chrome 书签结构。
-
-导入入口在设置页的“导入导出”中，适合把已有浏览器书签平滑迁移到扩展里继续整理。
-
-![导入入口](pic/import.png)
-
-开始导入后，可以按目录选择要导入的书签，并决定是否保留文件夹路径标签、是否智能生成标签。
-
-![选择导入浏览器书签](pic/import-browser.png)
-
-## 安装
-
-### 应用商店安装
-
-- Chrome `🧩`：<https://chromewebstore.google.com/detail/smart-bookmark/nlboajobccgidfcdoedphgfaklelifoa>
-- Edge `🧩`：<https://microsoftedge.microsoft.com/addons/detail/smart-bookmark/dohicooegjedllghbfapbmbhjopnkbad>
-
-### 本地加载
+1. 克隆项目：
 
 ```bash
 git clone https://github.com/howoii/SmartBookmark.git
 cd SmartBookmark
 ```
 
-然后在浏览器扩展管理页面中：
+2. 打开浏览器扩展页面：
+   - Chrome: `chrome://extensions/`
+   - Edge: `edge://extensions/`
 
-1. 打开开发者模式
-2. 选择“加载已解压的扩展程序”
-3. 选择项目根目录
-
-## 开发
+3. 开启「开发者模式」，点击「加载已解压的扩展程序」，选择项目根目录。
 
 ### 本地开发
 
+- 修改代码后，在扩展页面点击 `刷新`
+- Service Worker 修改需要重新加载扩展
+- 使用浏览器开发者工具查看 `logger.debug/info/error` 日志
+
+### 本地配置
+
+- 复制 `env.json` 并填写你的 AI API Key
+- 将 `env.json` 保持为本地私密文件，不要提交到仓库
+
+### 调试方法
+
+- Popup 页面：右键插件图标 → 检查
+- Service Worker：扩展页面 → Service Worker → 检查
+- 设置页和快速搜索页面同样可在控制台调试
+
+### 构建发布
+
 ```bash
-git clone https://github.com/howoii/SmartBookmark.git
-cd SmartBookmark
-npm install
+# 手动打包
+# 1. 删除 env.json 或确保敏感信息不包含在发布包中
+# 2. 将项目目录压缩为 zip
+# 3. 上传到 Chrome Web Store / Edge Add-ons
 ```
 
-然后：
+---
 
-1. 在 Chrome 或 Edge 中加载本地扩展
-2. 修改页面脚本或样式后，通常刷新扩展页面即可看到效果
-3. 修改 `background.js` 或其他后台逻辑后，重新加载扩展更稳妥
-4. 如需调试背景逻辑，在扩展管理页打开 Service Worker 调试
+## 🧠 开发者须知
 
-### 项目结构
+### 设计原则
 
-```text
-SmartBookmark/
-├── manifest.json
-├── background.js
-├── popup.html / popup.js
-├── quickSave.html / quickSave.js
-├── quickSearch.html / quickSearch.js
-├── settings.html / settings.js
-├── api.js
-├── models.js
-├── storageManager.js
-├── filterManager.js
-├── search.js
-├── webdavClient.js
-├── webdavSync.js
-└── _locales/
+- 所有浏览器存储访问集中在 `storageManager.js`
+- 使用 `async/await` 保持异步逻辑清晰
+- 使用 `logger.debug/info/error` 统一日志风格
+- 界面与业务逻辑分离，UI 页面通过消息与后台交互
+- 使用 `tagVersion` 管理数据模型变更与兼容性
+
+### 关键实现点
+
+- `api.js`：多 AI 服务支持、Embedding 批量分批、token 估算
+- `search.js`：混合语义搜索与关键词匹配、余弦相似度评分
+- `autoSync.js`：通过 `chrome.alarms` 调度同步任务
+- `storageManager.js`：本地缓存、消息广播、写入通知与防抖更新
+
+### 关键配置说明
+
+- `manifest.json` 中声明：
+  - `action.default_popup = quickSave.html`
+  - `side_panel.default_path = popup.html`
+  - `options_page = settings.html`
+  - 权限：`tabs`, `storage`, `activeTab`, `scripting`, `sidePanel`, `bookmarks`, `unlimitedStorage`, `favicon`, `alarms`
+  - 快捷键：`quick-search`, `quick-save`
+  - `omnibox` 关键词：`sb`
+
+---
+
+## 🤝 贡献指南
+
+欢迎任何开发者参与贡献。
+
+### 代码贡献流程
+
+1. Fork 本仓库
+2. 新建分支：
+
+```bash
+git checkout -b feature/your-feature
 ```
 
-### 贡献
+3. 提交修改：
 
-欢迎提交 Issue、改进建议和 Pull Request。
+```bash
+git commit -m "feat: 描述新增功能"
+```
 
-建议 Issue 至少包含这些信息：
+4. 推送分支并创建 Pull Request
 
-- 复现步骤
-- 预期结果
-- 实际结果
-- 浏览器版本
-- 截图或录屏
-
-常用提交前缀：
+### 提交规范
 
 - `feat:` 新功能
-- `fix:` 修复问题
+- `fix:` Bug 修复
 - `docs:` 文档更新
-- `refactor:` 重构
+- `refactor:` 代码重构
+- `style:` 代码格式调整
 - `test:` 测试相关
 
-## 常见问题
+### 问题反馈
 
-### 我必须配置 AI 才能使用吗？
+- GitHub Issues：<https://github.com/howoii/SmartBookmark/issues>
+- 请提供复现步骤、浏览器版本、截图或日志
 
-不是。基础书签保存、浏览和整理可以单独使用；智能标签、摘要、语义搜索需要可用的 AI 服务。
+---
 
-### 导入会不会影响我原来的 Chrome 书签？
+## 📚 FAQ
 
-不会。导入动作只会把你选中的内容复制到扩展里继续管理，不会改动 Chrome 原有书签结构。
+### 支持哪些 AI 模型？
 
-### 不想用 AI 的时候，还能正常保存书签吗？
+- OpenAI：`GPT-3.5-turbo`, `GPT-4`, `GPT-4-turbo`
+- 通义千问：`qwen-turbo`, `qwen-plus`, `qwen-max`
+- 智谱 GLM：`glm-3-turbo`, `glm-4`
+- Ollama：本地模型（如 `llama2`, `mistral`）
+- 自定义 API：兼容 OpenAI API 格式
 
-可以。只是不会自动生成标签、摘要，也不能使用依赖 AI 的搜索增强能力。
+### 数据存储在哪里？
 
-### 能不能同步到别的设备？
+- 书签数据存储在浏览器本地（`chrome.storage.local`）
+- WebDAV 同步时，仅与用户配置的服务器交互
+- 不会默认上传到第三方服务器
 
-可以。项目支持 WebDAV 同步，适合希望自己掌控同步方式的用户。
+### 为什么需要 API Key？
 
-### 隐私方面做了什么保护？
+- 语义搜索依赖 Embedding API
+- AI 标签与摘要生成需要模型调用
+- 你也可以选择使用本地 Ollama 模型，减少云服务依赖
 
-扩展会自动识别并保护常见的隐私页面类型，例如登录、支付、邮箱和包含敏感参数的页面，避免在这些页面上误读或误存内容。
+### 如何导出书签？
 
-![隐私保护](pic/yinsi_baohu.png)
+1. 打开主界面
+2. 点击右上角菜单
+3. 选择「导出书签」
+4. 支持 JSON / HTML 格式
 
-## 许可证
+### 插件占用多少存储空间？
 
-本项目基于 [MIT License](LICENSE) 开源。
+- 插件本体：约 2MB
+- 书签数据大小与数量相关，1000 个书签（含向量）约 10-20MB
+- 已申请 `unlimitedStorage` 权限，可支持大规模书签存储
+
+### 遇到问题怎么办？
+
+1. 查看 README FAQ 是否已覆盖
+2. 在 GitHub Issues 搜索相关问题
+3. 如果问题未解决，请提交新 Issue
+
+---
+
+## 📬 联系方式
+
+### 问题反馈
+
+- GitHub Issues：<https://github.com/howoii/SmartBookmark/issues>
+- Email：yz0917@foxmail.com
+
+### 交流讨论
+
+- 微信：
+  <img width="200" src="pic/wechat2.JPG" alt="微信二维码" />
+
+---
+
+## 🙏 致谢
+
+感谢所有参与贡献的开发者与用户，欢迎 Fork、优化与扩展本项目。
+
+---
+
+## 📄 License
+
+本项目采用 [MIT 协议](LICENSE) 开源。
+
+欢迎自由使用、修改和分发，但请保留原作者信息。
+
+---
+
+<div align="center">
+
+**如果这个项目对你有帮助，欢迎 ⭐ Star 支持一下！**
+
+[⬆ 回到顶部](#-smart-bookmark)
+
+</div>
