@@ -32,6 +32,9 @@
     "ui_label_recommended_tags": {
         "message": "Recommended tags:"
     },
+    "ui_label_recommended_bookmarks": {
+        "message": "Recommended bookmarks:"
+    },
     "ui_tag_unclassified": {
         "message": "Unclassified"
     },
@@ -104,5 +107,11 @@
     },
     "prompt_generate_tags_sys": {
         "message": "You are a professional web content analysis expert specializing in extracting core themes from articles and generating accurate tags."
+    },
+    "prompt_generate_hierarchical_tags_sys": {
+        "message": "You are a professional scenario-based bookmark classification expert. You build hierarchical tags around the user's future retrieval context."
+    },
+    "prompt_generate_hierarchical_tags_user": {
+        "message": "Generate 2-5 scenario-based hierarchical tags from the following webpage content so the bookmark can be found later.\n\nWebpage content:\n{{content}}\n\nRequirements:\n1. Hierarchy: every tag must use \"/\" and contain 2-3 levels, such as Work/Technical Research/WeChat Ecosystem.\n2. Semantics: prefer the structure \"usage scenario/task intent/topic object\".\n   - Level 1: usage scenario, such as Work, Development, Learning, Project, Research, Life.\n   - Level 2: task intent, such as Technical Research, Platform Integration, Knowledge Capture, Archive, Solution Design, Troubleshooting.\n   - Level 3: topic object, such as WeChat Ecosystem, API Capability, React, Product Research.\n3. Scenario first: do not only describe what the page is; express where the user will need it later.\n4. Do not output isolated keywords or generic labels such as Tech, WeChat, Docs, Tutorial, Notes.\n5. Keep each level concise.\n6. Output format: only return tags separated by \"|\", with no explanation.\n\nExample output:\nWork/Technical Research/WeChat Ecosystem|Development/Platform Integration/WeChat API|Learning/Knowledge Capture/Technical Notes|Project/Archive/WeChat"
     }
 }

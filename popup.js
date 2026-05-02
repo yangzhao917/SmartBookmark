@@ -527,6 +527,8 @@ class BookmarkManager {
         this.isEditMode = false;
         this.editingBookmark = null;
         this.excerptRequest = null;
+        this.bookmarkSuggestionRequest = null;
+        this.bookmarkSuggestions = [];
         // 将 DOM 元素分为必需和可选两类
         this.elements = {
             required: {                
@@ -545,6 +547,8 @@ class BookmarkManager {
                 deleteBookmarkBtn: document.getElementById('delete-bookmark-btn'),
                 dialogContent: document.querySelector('#tags-dialog .dialog-content'),
                 recommendedTags: document.querySelector('.recommended-tags'),
+                bookmarkSuggestions: document.getElementById('bookmark-suggestions'),
+                bookmarkSuggestionsList: document.querySelector('.bookmark-suggestions-list'),
                 pageExcerpt: document.getElementById('page-excerpt'),
                 dialogTitle: document.querySelector('.page-title'),
                 pageUrl: document.querySelector('.page-url')
@@ -722,7 +726,8 @@ class BookmarkManager {
             dialogTitle,
             deleteBookmarkBtn,
             pageUrl,
-            pageExcerpt
+            pageExcerpt,
+            bookmarkSuggestionsList
         } = this.elements.optional;
 
         // 基本的对话框关闭功能（必需）
@@ -737,6 +742,10 @@ class BookmarkManager {
             if (this.excerptRequest) {
                 this.excerptRequest.abort();
                 this.excerptRequest = null;
+            }
+            if (this.bookmarkSuggestionRequest) {
+                this.bookmarkSuggestionRequest.abort();
+                this.bookmarkSuggestionRequest = null;
             }
         };
 
@@ -760,15 +769,7 @@ class BookmarkManager {
             newTagInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
                     const newTag = newTagInput.value.trim().replace(/>/g, '/'); // 将>转换为/
-                    if (newTag) {
-                        const currentTags = this.getCurrentTags();
-                        if (!currentTags.includes(newTag)) {
-                            this.renderTags([...currentTags, newTag]);
-                            newTagInput.value = '';
-                        } else {
-                            updateStatus('标签已存在', true);
-                        }
-                    }
+                    this.addNewTag(newTag);
                 }
             });
 
@@ -812,6 +813,27 @@ class BookmarkManager {
                             newTagInput.focus();
                         }
                     }
+                }
+            });
+        }
+
+        if (bookmarkSuggestionsList) {
+            bookmarkSuggestionsList.addEventListener('click', (e) => {
+                const tagElement = e.target.closest('.bookmark-suggestion-tag');
+                if (tagElement) {
+                    const tag = tagElement.dataset.tag || tagElement.textContent.trim();
+                    this.addNewTag(tag);
+                    return;
+                }
+
+                const suggestionCard = e.target.closest('.bookmark-suggestion-item');
+                if (!suggestionCard) return;
+
+                const index = Number(suggestionCard.dataset.index);
+                const suggestion = this.bookmarkSuggestions?.[index];
+                if (suggestion) {
+                    this.addBookmarkSuggestionTags(suggestion.tags || []);
+                    this.setActiveBookmarkSuggestion(index);
                 }
             });
         }
@@ -923,8 +945,18 @@ class BookmarkManager {
     }
     
     // AI生成书签摘要
-    async generateExcerpt(textarea) {
+    async autoGenerateExcerptIfNeeded(textarea) {
+        const generateBtn = document.getElementById('generate-excerpt-btn');
+        if (!textarea || !generateBtn) return;
+        if (textarea.value.trim()) return;
+        if (generateBtn.classList.contains('loading')) return;
+
+        await this.generateExcerpt(textarea, { silent: true });
+    }
+
+    async generateExcerpt(textarea, options = {}) {
         if (!textarea) return;
+        const { silent = false } = options;
         
         // 获取生成按钮
         const generateBtn = document.getElementById('generate-excerpt-btn');
@@ -963,7 +995,9 @@ class BookmarkManager {
                 throw new Error('摘要生成失败');
             }
         } catch (error) {
-            if (error.message.includes('UserCanceled')) {
+            if (silent) {
+                logger.debug('自动生成摘要失败:', error);
+            } else if (error.message.includes('UserCanceled')) {
                 updateStatus('已取消生成摘要', false);
             } else {
                 updateStatus(`${error.message}`, true);
@@ -1272,8 +1306,29 @@ class BookmarkManager {
             metadata: {}
         };
 
+        await this.loadActiveTabContentForExcerpt(bookmark);
+
         // 显示编辑对话框
         await this.showTagsDialog(bookmark.tags);
+    }
+
+    async loadActiveTabContentForExcerpt(bookmark) {
+        if (bookmark?.excerpt) return;
+
+        try {
+            const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!activeTab || activeTab.url !== bookmark.url || activeTab.status !== 'complete') {
+                return;
+            }
+
+            const pageContent = await getPageContent(activeTab);
+            if (pageContent && Object.keys(pageContent).length > 0) {
+                this.currentTab = activeTab;
+                this.pageContent = pageContent;
+            }
+        } catch (error) {
+            logger.debug('获取活动页内容用于摘要生成失败:', error);
+        }
     }
 
     async showTagsDialog(tags) {
@@ -1362,10 +1417,7 @@ class BookmarkManager {
                 recommendedTags.querySelectorAll('.tag').forEach(tagElement => {
                     tagElement.addEventListener('click', () => {
                         const tag = tagElement.dataset.tag;
-                        const currentTags = this.getCurrentTags();
-                        if (!currentTags.includes(tag)) {
-                            this.renderTags([...currentTags, tag]);
-                        }
+                        this.addNewTag(tag);
                     });
                 });
             }
@@ -1376,6 +1428,12 @@ class BookmarkManager {
         
         // 显示对话框
         dialog.classList.add('show');
+
+        // 复用快速保存的推荐书签逻辑，为当前编辑弹窗生成候选标签
+        this.setupBookmarkSuggestions();
+
+        // 摘要为空时自动生成内容摘要，不覆盖已有摘要
+        this.autoGenerateExcerptIfNeeded(dialogExcerpt);
     }
 
     renderTags(tags) {
@@ -1412,6 +1470,133 @@ class BookmarkManager {
             }
 
             tagsList.appendChild(tagElement);
+        });
+    }
+
+    addNewTag(tag) {
+        const newTagInput = this.elements.optional.newTagInput;
+        const normalizedTag = (tag || '').trim().replace(/>/g, '/');
+        if (!normalizedTag) return;
+
+        const currentTags = this.getCurrentTags();
+        if (!currentTags.includes(normalizedTag)) {
+            this.renderTags([...currentTags, normalizedTag]);
+            if (newTagInput) {
+                newTagInput.value = '';
+            }
+        } else {
+            updateStatus('标签已存在', true);
+        }
+    }
+
+    showBookmarkSuggestionsLoading() {
+        const { bookmarkSuggestions, bookmarkSuggestionsList } = this.elements.optional;
+        if (!bookmarkSuggestions || !bookmarkSuggestionsList) return;
+
+        bookmarkSuggestions.style.display = 'block';
+        bookmarkSuggestionsList.innerHTML = `
+            <div class="bookmark-suggestions-loading">
+                <div class="loading-spinner"></div>
+                <span>正在推荐书签...</span>
+            </div>
+        `;
+    }
+
+    hideBookmarkSuggestions() {
+        const { bookmarkSuggestions, bookmarkSuggestionsList } = this.elements.optional;
+        if (!bookmarkSuggestions || !bookmarkSuggestionsList) return;
+
+        bookmarkSuggestions.style.display = 'none';
+        bookmarkSuggestionsList.innerHTML = '';
+    }
+
+    async setupBookmarkSuggestions() {
+        try {
+            this.showBookmarkSuggestionsLoading();
+            this.bookmarkSuggestionRequest = requestManager.create();
+            const suggestions = await generateBookmarkSuggestions(
+                this.pageContent || {},
+                this.currentTab,
+                this.getCurrentTags(),
+                this.bookmarkSuggestionRequest.signal
+            );
+
+            this.bookmarkSuggestions = suggestions;
+            this.renderBookmarkSuggestions(suggestions);
+        } catch (error) {
+            logger.error('初始化推荐书签失败:', error);
+            this.hideBookmarkSuggestions();
+        } finally {
+            this.bookmarkSuggestionRequest = null;
+        }
+    }
+
+    renderBookmarkSuggestions(suggestions) {
+        const { bookmarkSuggestions, bookmarkSuggestionsList } = this.elements.optional;
+        if (!bookmarkSuggestions || !bookmarkSuggestionsList) return;
+
+        bookmarkSuggestionsList.innerHTML = '';
+        if (!Array.isArray(suggestions) || suggestions.length === 0) {
+            this.hideBookmarkSuggestions();
+            return;
+        }
+
+        bookmarkSuggestions.style.display = 'block';
+        suggestions.forEach((suggestion, index) => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'bookmark-suggestion-item';
+            item.dataset.index = String(index);
+            item.title = '使用这个书签方案';
+
+            const title = document.createElement('div');
+            title.className = 'bookmark-suggestion-name';
+            title.textContent = suggestion.title || '';
+            item.appendChild(title);
+
+            if (suggestion.excerpt) {
+                const excerpt = document.createElement('div');
+                excerpt.className = 'bookmark-suggestion-excerpt';
+                excerpt.textContent = suggestion.excerpt;
+                item.appendChild(excerpt);
+            }
+
+            const tags = document.createElement('div');
+            tags.className = 'bookmark-suggestion-tags';
+            (suggestion.tags || []).slice(0, 4).forEach(tag => {
+                const tagEl = document.createElement('span');
+                tagEl.className = 'bookmark-suggestion-tag';
+                tagEl.dataset.tag = tag;
+                tagEl.textContent = tag;
+                tags.appendChild(tagEl);
+            });
+            item.appendChild(tags);
+
+            bookmarkSuggestionsList.appendChild(item);
+        });
+    }
+
+    addBookmarkSuggestionTags(tags) {
+        if (!Array.isArray(tags) || tags.length === 0) return;
+
+        const currentTags = this.getCurrentTags();
+        const nextTags = [...currentTags];
+
+        tags.forEach(tag => {
+            if (tag && !nextTags.includes(tag)) {
+                nextTags.push(tag);
+            }
+        });
+
+        this.renderTags(nextTags);
+    }
+
+    setActiveBookmarkSuggestion(index) {
+        const { bookmarkSuggestionsList } = this.elements.optional;
+        if (!bookmarkSuggestionsList) return;
+
+        bookmarkSuggestionsList.querySelectorAll('.bookmark-suggestion-item').forEach((item, itemIndex) => {
+            item.classList.toggle('active', itemIndex === index);
         });
     }
 
@@ -1482,13 +1667,7 @@ class BookmarkManager {
 
             // 点击建议项添加标签
             suggestionItem.addEventListener('click', () => {
-                const currentTags = this.getCurrentTags();
-                if (!currentTags.includes(tag)) {
-                    this.renderTags([...currentTags, tag]);
-                    newTagInput.value = '';
-                } else {
-                    updateStatus('标签已存在', true);
-                }
+                this.addNewTag(tag);
                 this.hideTagSuggestions();
             });
 

@@ -315,7 +315,7 @@ async function getBatchEmbeddings(texts) {
     }
 }
 
-async function getChatCompletion(systemPrompt, userPrompt, signal = null) {
+async function getChatCompletion(systemPrompt, userPrompt, signal = null, maxTokens = 100) {
     try {
         // 使用专门用于Chat的服务
         const apiService = await ConfigManager.getChatService();
@@ -337,7 +337,7 @@ async function getChatCompletion(systemPrompt, userPrompt, signal = null) {
                     content: userPrompt
                 }],
                 temperature: 0.3, // 降低温度以获得更稳定的输出
-                max_tokens: 100,
+                max_tokens: maxTokens,
             })
         };
         
@@ -459,9 +459,13 @@ async function generateHierarchicalTags(pageContent, tab) {
             // 验证层级标签格式
             const parts = tag.split('/');
 
-            // 最多3级
-            if (parts.length > 3) {
-                logger.debug('标签层级过多，已过滤:', tag);
+            // 场景化层级标签必须是2-3级
+            if (parts.length < 2 || parts.length > 3) {
+                logger.debug('标签层级数量不符合要求，已过滤:', tag);
+                return false;
+            }
+            if (!isSceneTagRoot(parts[0])) {
+                logger.debug('标签缺少场景入口，已过滤:', tag);
                 return false;
             }
 
@@ -498,7 +502,10 @@ async function generateHierarchicalTags(pageContent, tab) {
         tags = getFallbackHierarchicalTags(tab.title, pageContent?.metadata);
     }
 
-    tags = cleanTags(tags);
+    tags = normalizeSceneHierarchicalTags(tags);
+    if (tags.length === 0) {
+        tags = getFallbackHierarchicalTags(tab.title, pageContent?.metadata);
+    }
     return tags.length > 0 ? tags : [i18n.M('ui_tag_unclassified')];
 }
 
@@ -531,29 +538,13 @@ function extractFlatTags(hierarchicalTags) {
  * @returns {Array<string>} 层级标签数组
  */
 function getFallbackHierarchicalTags(title, metadata) {
-    const flatTags = getFallbackTags(title, metadata);
-
-    // 将扁平标签转换为简单的层级标签
-    // 如果有多个标签，尝试构建简单的层级关系
-    if (flatTags.length >= 2) {
-        // 第一个标签作为一级分类，其他作为二级
-        const hierarchicalTags = [];
-        const firstTag = flatTags[0];
-
-        for (let i = 1; i < flatTags.length && i < 4; i++) {
-            hierarchicalTags.push(`${firstTag}/${flatTags[i]}`);
-        }
-
-        // 如果只生成了一个层级标签，添加第一个标签作为独立标签
-        if (hierarchicalTags.length === 0) {
-            hierarchicalTags.push(firstTag);
-        }
-
-        return hierarchicalTags;
-    }
-
-    // 如果标签太少，直接返回扁平标签
-    return flatTags;
+    const topic = getSceneBookmarkTopic(title, { metadata });
+    return normalizeSceneHierarchicalTags([
+        `工作/资料收集/${topic}`,
+        `工作/主题调研/${topic}`,
+        `学习/知识沉淀/${topic}`,
+        `项目/资料归档/${topic}`
+    ]);
 }
 
 // 用 ChatGPT API 生成摘要
@@ -576,4 +567,208 @@ async function generateExcerpt(pageContent, tab, signal = null) {
 
     const excerptText = await getChatCompletion(SYSTEM_PROMPT_EXCERPT, prompt, signal) || '';
     return excerptText;
+}
+
+const SYSTEM_PROMPT_BOOKMARK_SUGGESTIONS = `
+你是"场景化书签推荐助手"，负责为当前网页生成多个可收藏方案，帮助用户在未来不同使用场景中快速找回资料。
+请严格遵守：
+1. 只输出 JSON 数组，不要使用 Markdown 代码块，不要添加解释文字。
+2. 数组长度为 3，每项包含 title、excerpt、tags 三个字段。
+3. title 应简洁清晰，避免照搬网页标题，长度不超过 30 个中文字符或 60 个英文字符。
+4. excerpt 不超过 80 个中文字符，客观描述页面价值。
+5. tags 必须是 2-4 个场景化层级标签，每个标签必须使用"/"分隔，且只能是 2-3 级。
+6. 层级语义必须遵循"使用场景/任务意图/主题对象"，例如"工作/技术调研/微信生态"、"开发/平台接入/微信接口"、"学习/知识沉淀/技术笔记"。
+7. 不要输出孤立关键词或泛化分类，如"技术"、"微信"、"文档"、"笔记"；必须说明这个书签未来会在什么场景下被使用。
+8. 三个候选应覆盖不同找回场景，例如调研、开发、学习、项目归档、方案设计、问题排查等。
+`;
+
+const USER_PROMPT_BOOKMARK_SUGGESTIONS = `
+请根据以下网页信息生成 3 个不同使用场景的书签候选。重点不是"网页里有哪些关键词"，而是"用户以后会在什么场景下重新查找它"。
+{{content}}
+`;
+
+function normalizeBookmarkSuggestion(rawSuggestion, tab, pageContent) {
+    if (!rawSuggestion || typeof rawSuggestion !== 'object') {
+        return null;
+    }
+
+    const title = String(rawSuggestion.title || '').trim();
+    if (!title) {
+        return null;
+    }
+
+    const excerpt = String(rawSuggestion.excerpt || pageContent?.excerpt || '').trim().slice(0, 500);
+    const tags = Array.isArray(rawSuggestion.tags)
+        ? rawSuggestion.tags
+        : String(rawSuggestion.tags || '').split(/[|,，;；]/);
+
+    return {
+        title: smartTruncate(title, 80),
+        excerpt: smartTruncate(excerpt, 120),
+        tags: normalizeBookmarkSuggestionTags(tags).slice(0, 5)
+    };
+}
+
+function normalizeBookmarkSuggestionTags(tags) {
+    return normalizeSceneHierarchicalTags(tags);
+}
+
+function normalizeSceneHierarchicalTags(tags) {
+    return cleanTags((tags || []).map(tag => String(tag || '').trim()).filter(Boolean))
+        .filter(tag => {
+            const parts = tag.split('/');
+            if (parts.length < 2 || parts.length > 3) return false;
+            if (!isSceneTagRoot(parts[0])) return false;
+
+            return parts.every(part => {
+                const partTrimmed = part.trim();
+                const partLength = getStringVisualLength(partTrimmed);
+                return partTrimmed &&
+                    partLength >= 2 &&
+                    partLength <= 20 &&
+                    /^[^<>"\\.,#!$%\\^&\\*;:{}=\\-_`~()]+$/.test(partTrimmed);
+            });
+        })
+        .filter((tag, index, self) => self.indexOf(tag) === index);
+}
+
+function isSceneTagRoot(root) {
+    const sceneRoots = new Set([
+        '工作', '开发', '学习', '项目', '研究', '生活', '个人', '设计', '运营', '产品',
+        'Work', 'Development', 'Learning', 'Project', 'Research', 'Life', 'Personal', 'Design', 'Operations', 'Product'
+    ]);
+    return sceneRoots.has(String(root || '').trim());
+}
+
+function isGenericBookmarkTopic(topic) {
+    const genericTopics = new Set([
+        '未分类', '技术', '文档', '教程', '笔记', '资料', '文章', '网页', '链接',
+        'Unclassified', 'Tech', 'Docs', 'Tutorial', 'Notes', 'Reference', 'Article', 'Webpage', 'Link'
+    ]);
+    return genericTopics.has(String(topic || '').trim());
+}
+
+function getFallbackBookmarkSuggestions(pageContent, tab, existingTags = []) {
+    const title = pageContent?.title || tab?.title || '';
+    const excerpt = pageContent?.excerpt || pageContent?.metadata?.description || '';
+    const topic = getBookmarkSuggestionTopic(title, pageContent, tab, existingTags);
+    const compactTitle = title
+        .replace(/\s*[-_|]\s*.*$/, '')
+        .trim() || title;
+
+    return [
+        {
+            title: compactTitle,
+            excerpt: smartTruncate(excerpt, 120),
+            tags: [
+                `工作/资料收集/${topic}`,
+                `工作/主题调研/${topic}`,
+                `项目/资料归档/${topic}`
+            ]
+        },
+        {
+            title: `${compactTitle} 笔记`,
+            excerpt: smartTruncate(excerpt || '适合后续查阅的页面资料', 120),
+            tags: [
+                `学习/知识沉淀/${topic}`,
+                `学习/主题笔记/${topic}`,
+                `个人/资料整理/${topic}`
+            ]
+        },
+        {
+            title: `${compactTitle} 参考资料`,
+            excerpt: smartTruncate(excerpt || '可作为主题检索和资料整理的书签', 120),
+            tags: [
+                `项目/方案设计/${topic}`,
+                `开发/参考资料/${topic}`,
+                `工作/问题排查/${topic}`
+            ]
+        }
+    ].map(item => ({
+        ...item,
+        tags: normalizeBookmarkSuggestionTags(item.tags)
+    })).filter(item => item.title);
+}
+
+function getBookmarkSuggestionTopic(title, pageContent, tab, existingTags = []) {
+    const sourceTags = Array.from(new Set((existingTags || []).map(tag => String(tag || '').trim()).filter(Boolean)));
+    const leafTag = sourceTags
+        .map(tag => tag.split('/').pop().trim())
+        .find(tag => getStringVisualLength(tag) >= 2 && getStringVisualLength(tag) <= 20 && !isGenericBookmarkTopic(tag));
+
+    if (leafTag) {
+        return leafTag;
+    }
+
+    return getSceneBookmarkTopic(title, pageContent, tab);
+}
+
+function getSceneBookmarkTopic(title, pageContent, tab = null) {
+    const text = `${title || ''} ${pageContent?.metadata?.keywords || ''} ${pageContent?.metadata?.description || ''} ${tab?.url || ''}`;
+    const topicPatterns = [
+        { pattern: /微信|wechat/i, topic: '微信生态' },
+        { pattern: /react/i, topic: 'React' },
+        { pattern: /vue/i, topic: 'Vue' },
+        { pattern: /typescript|ts\b/i, topic: 'TypeScript' },
+        { pattern: /javascript|js\b/i, topic: 'JavaScript' },
+        { pattern: /openai|chatgpt|gpt/i, topic: 'AI应用' },
+        { pattern: /api|接口/i, topic: '接口能力' },
+        { pattern: /设计|design/i, topic: '设计参考' },
+        { pattern: /产品|product/i, topic: '产品研究' }
+    ];
+    const matched = topicPatterns.find(item => item.pattern.test(text));
+
+    if (matched) {
+        return matched.topic;
+    }
+
+    return smartTruncate(
+        String(title || '')
+            .replace(/\s*[-_|]\s*.*$/, '')
+            .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '')
+            .trim() || '主题资料',
+        12
+    );
+}
+
+async function generateBookmarkSuggestions(pageContent, tab, existingTags = [], signal = null) {
+    const fallbackSuggestions = getFallbackBookmarkSuggestions(pageContent, tab, existingTags);
+
+    try {
+        const prompt = makeChatPrompt(pageContent, tab, USER_PROMPT_BOOKMARK_SUGGESTIONS);
+        logger.debug('生成书签候选的prompt:\n ', prompt);
+
+        const suggestionsText = await getChatCompletion(SYSTEM_PROMPT_BOOKMARK_SUGGESTIONS, prompt, signal, 700) || '';
+        const jsonText = extractJsonArrayText(suggestionsText);
+        const parsed = JSON.parse(jsonText);
+
+        if (!Array.isArray(parsed)) {
+            throw new Error('书签候选响应格式错误');
+        }
+
+        const suggestions = parsed
+            .map(suggestion => normalizeBookmarkSuggestion(suggestion, tab, pageContent))
+            .filter(Boolean)
+            .slice(0, 3);
+
+        return suggestions.length > 0 ? suggestions : fallbackSuggestions;
+    } catch (error) {
+        logger.error('生成书签候选失败:', error);
+        return fallbackSuggestions;
+    }
+}
+
+function extractJsonArrayText(text) {
+    const cleanedText = String(text || '')
+        .replace(/^```(?:json)?/i, '')
+        .replace(/```$/i, '')
+        .trim();
+    const startIndex = cleanedText.indexOf('[');
+    const endIndex = cleanedText.lastIndexOf(']');
+
+    if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+        return cleanedText;
+    }
+
+    return cleanedText.slice(startIndex, endIndex + 1);
 }

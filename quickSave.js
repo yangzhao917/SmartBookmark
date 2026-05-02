@@ -13,6 +13,8 @@ class QuickSaveManager {
             saveTagsBtn: document.getElementById('save-tags-btn'),
             cancelTagsBtn: document.getElementById('cancel-tags-btn'),
             deleteBookmarkBtn: document.getElementById('delete-bookmark-btn'),
+            bookmarkSuggestions: document.getElementById('bookmark-suggestions'),
+            bookmarkSuggestionsList: document.querySelector('.bookmark-suggestions-list'),
             recommendedTags: document.querySelector('.recommended-tags'),
             recommendedTagsList: document.querySelector('.recommended-tags-list'),
             status: document.getElementById('status'),
@@ -29,6 +31,8 @@ class QuickSaveManager {
         this.statusTimeout = null;
         this.originalUrl = null;
         this.excerptRequest = null;
+        this.bookmarkSuggestionRequest = null;
+        this.bookmarkSuggestions = [];
 
         this.init();
     }
@@ -69,9 +73,15 @@ class QuickSaveManager {
             
             // 获取页面内容并处理标签
             await this.setupPageContentAndTags();
-            
+
             // 设置事件监听
             this.setupEventListeners();
+
+            // 生成书签候选时不阻塞用户继续编辑或保存
+            await this.setupBookmarkSuggestions();
+
+            // 摘要为空时自动生成内容摘要，不覆盖已有摘要
+            this.autoGenerateExcerptIfNeeded();
         } catch (error) {
             logger.error('初始化失败:', error);
             this.showStatus(i18n.M('msg_error_init_failed', [error.message]), 'error', true);
@@ -199,49 +209,21 @@ class QuickSaveManager {
                 this.renderPageExcerpt(this.pageContent.excerpt?.trim());
             }
 
-            // 如果有关键词，显示为推荐标签
+            // 推荐书签会承载候选标签，避免和关键词推荐同时出现造成重复选择负担
             this.elements.recommendedTags.style.display = 'none';
-            if (this.pageContent.metadata?.keywords) {
-                this.showRecommendedTags(this.pageContent.metadata.keywords);
-            }
 
-            // 如果不是编辑模式，生成并显示标签
-            const unclassifiedTag = i18n.M('ui_tag_unclassified');
+            // 新书签由推荐书签候选接管初始标题、摘要和标签，避免默认标签与候选标签同时出现
             if (this.isEditMode) {
-                this.renderTags(this.editingBookmark?.tags);
+                this.renderTags(this.editingBookmark?.tags || []);
             } else {
-                this.showTagsLoading();
-                try {
-                    // 检查缓存中是否已有标签
-                    const cachedTags = await LocalStorageMgr.getTags(this.currentTab.url);
-                    if (cachedTags) {
-                        logger.debug('使用缓存的标签:', cachedTags);
-                        this.hideTagsLoading();
-                        this.renderTags(cachedTags);
-                    } else {
-                        const hierarchicalTags = await generateHierarchicalTags(this.pageContent, this.currentTab);
-                        logger.debug('生成层级标签:', hierarchicalTags);
-                        this.hideTagsLoading();
-                        if (hierarchicalTags && hierarchicalTags.length > 0) {
-                            this.renderTags(hierarchicalTags);
-                            // 缓存生成的标签
-                            await LocalStorageMgr.setTags(this.currentTab.url, hierarchicalTags);
-                            logger.debug('缓存标签:', hierarchicalTags);
-                        } else {
-                            this.renderTags([unclassifiedTag]);
-                        }
-                    }
-                } catch (error) {
-                    logger.error('生成标签失败:', error);
-                    this.hideTagsLoading();
-                    this.renderTags([unclassifiedTag]);
-                }
+                this.hideTagsLoading();
+                this.renderTags([]);
             }
         } catch (error) {
             logger.error('获取页面内容失败:', error);
             if (!this.isEditMode) {
                 this.hideTagsLoading();
-                this.renderTags([unclassifiedTag]);
+                this.renderTags([]);
             }
         }
     }
@@ -266,7 +248,7 @@ class QuickSaveManager {
     }
 
     setupEventListeners() {
-        const { pageTitle, pageUrl, tagsList, newTagInput, saveTagsBtn, cancelTagsBtn, deleteBookmarkBtn, recommendedTagsList, pageExcerpt, generateExcerptBtn } = this.elements;
+        const { pageTitle, pageUrl, tagsList, newTagInput, saveTagsBtn, cancelTagsBtn, deleteBookmarkBtn, recommendedTagsList, pageExcerpt, generateExcerptBtn, bookmarkSuggestionsList } = this.elements;
 
         pageTitle.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
@@ -343,6 +325,28 @@ class QuickSaveManager {
                 this.addNewTag(tagElement.textContent.trim());
             }
         });
+
+        // 推荐书签点击事件
+        if (bookmarkSuggestionsList) {
+            bookmarkSuggestionsList.addEventListener('click', (e) => {
+                const tagElement = e.target.closest('.bookmark-suggestion-tag');
+                if (tagElement) {
+                    const tag = tagElement.dataset.tag || tagElement.textContent.trim();
+                    this.applyBookmarkSuggestionTag(tag);
+                    return;
+                }
+
+                const suggestionCard = e.target.closest('.bookmark-suggestion-item');
+                if (!suggestionCard) return;
+
+                const index = Number(suggestionCard.dataset.index);
+                const suggestion = this.bookmarkSuggestions?.[index];
+                if (suggestion) {
+                    this.applyBookmarkSuggestion(suggestion);
+                    this.setActiveBookmarkSuggestion(index);
+                }
+            });
+        }
 
         // 取消按钮点击事件
         cancelTagsBtn.addEventListener('click', () => window.close());
@@ -473,6 +477,168 @@ class QuickSaveManager {
             .join('');
     }
 
+    showBookmarkSuggestionsLoading() {
+        const { bookmarkSuggestions, bookmarkSuggestionsList } = this.elements;
+        if (!bookmarkSuggestions || !bookmarkSuggestionsList) return;
+
+        bookmarkSuggestions.style.display = 'block';
+        bookmarkSuggestionsList.innerHTML = `
+            <div class="bookmark-suggestions-loading">
+                <div class="loading-spinner"></div>
+                <span>正在推荐书签...</span>
+            </div>
+        `;
+    }
+
+    hideBookmarkSuggestions() {
+        const { bookmarkSuggestions, bookmarkSuggestionsList } = this.elements;
+        if (!bookmarkSuggestions || !bookmarkSuggestionsList) return;
+
+        bookmarkSuggestions.style.display = 'none';
+        bookmarkSuggestionsList.innerHTML = '';
+    }
+
+    async setupBookmarkSuggestions() {
+        try {
+            this.showBookmarkSuggestionsLoading();
+            this.bookmarkSuggestionRequest = requestManager.create();
+            const currentTags = this.getCurrentTags();
+            const suggestions = await generateBookmarkSuggestions(
+                this.pageContent,
+                this.currentTab,
+                currentTags,
+                this.bookmarkSuggestionRequest.signal
+            );
+            this.bookmarkSuggestions = suggestions;
+            this.renderBookmarkSuggestions(suggestions);
+        } catch (error) {
+            logger.error('初始化书签候选失败:', error);
+            if (!this.isEditMode) {
+                const fallbackTags = await this.getFallbackInitialTags();
+                this.renderTags(fallbackTags);
+            } else {
+                this.hideBookmarkSuggestions();
+            }
+        } finally {
+            this.bookmarkSuggestionRequest = null;
+        }
+    }
+
+    async getFallbackInitialTags() {
+        const unclassifiedTag = i18n.M('ui_tag_unclassified');
+        try {
+            const cachedTags = await LocalStorageMgr.getTags(this.currentTab.url);
+            if (cachedTags?.length > 0) {
+                return cachedTags;
+            }
+
+            const hierarchicalTags = await generateHierarchicalTags(this.pageContent, this.currentTab);
+            if (hierarchicalTags?.length > 0) {
+                await LocalStorageMgr.setTags(this.currentTab.url, hierarchicalTags);
+                return hierarchicalTags;
+            }
+        } catch (error) {
+            logger.error('获取兜底标签失败:', error);
+        }
+        return [unclassifiedTag];
+    }
+
+    renderBookmarkSuggestions(suggestions) {
+        const { bookmarkSuggestions, bookmarkSuggestionsList } = this.elements;
+        if (!bookmarkSuggestions || !bookmarkSuggestionsList) return;
+
+        bookmarkSuggestionsList.innerHTML = '';
+        if (!Array.isArray(suggestions) || suggestions.length === 0) {
+            this.hideBookmarkSuggestions();
+            return;
+        }
+
+        bookmarkSuggestions.style.display = 'block';
+        suggestions.forEach((suggestion, index) => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'bookmark-suggestion-item';
+            item.dataset.index = String(index);
+            item.title = '使用这个书签方案';
+
+            const title = document.createElement('div');
+            title.className = 'bookmark-suggestion-name';
+            title.textContent = suggestion.title || '';
+            item.appendChild(title);
+
+            if (suggestion.excerpt) {
+                const excerpt = document.createElement('div');
+                excerpt.className = 'bookmark-suggestion-excerpt';
+                excerpt.textContent = suggestion.excerpt;
+                item.appendChild(excerpt);
+            }
+
+            const tags = document.createElement('div');
+            tags.className = 'bookmark-suggestion-tags';
+            (suggestion.tags || []).slice(0, 4).forEach(tag => {
+                const tagEl = document.createElement('span');
+                tagEl.className = 'bookmark-suggestion-tag';
+                tagEl.dataset.tag = tag;
+                tagEl.textContent = tag;
+                tags.appendChild(tagEl);
+            });
+            item.appendChild(tags);
+
+            bookmarkSuggestionsList.appendChild(item);
+        });
+    }
+
+    applyBookmarkSuggestion(suggestion) {
+        if (!suggestion) return;
+
+        if (this.isEditMode) {
+            this.addBookmarkSuggestionTags(suggestion.tags || []);
+            return;
+        }
+
+        if (suggestion.title) {
+            this.elements.pageTitle.textContent = suggestion.title;
+            this.elements.pageTitle.title = suggestion.title;
+        }
+
+        if (typeof suggestion.excerpt === 'string') {
+            this.renderPageExcerpt(suggestion.excerpt);
+        }
+
+        if (Array.isArray(suggestion.tags) && suggestion.tags.length > 0) {
+            this.renderTags(suggestion.tags);
+        }
+    }
+
+    addBookmarkSuggestionTags(tags) {
+        if (!Array.isArray(tags) || tags.length === 0) return;
+
+        const currentTags = this.getCurrentTags();
+        const nextTags = [...currentTags];
+
+        tags.forEach(tag => {
+            if (tag && !nextTags.includes(tag)) {
+                nextTags.push(tag);
+            }
+        });
+
+        this.renderTags(nextTags);
+    }
+
+    applyBookmarkSuggestionTag(tag) {
+        if (!tag) return;
+        this.addNewTag(tag);
+    }
+
+    setActiveBookmarkSuggestion(index) {
+        const { bookmarkSuggestionsList } = this.elements;
+        if (!bookmarkSuggestionsList) return;
+
+        bookmarkSuggestionsList.querySelectorAll('.bookmark-suggestion-item').forEach((item, itemIndex) => {
+            item.classList.toggle('active', itemIndex === index);
+        });
+    }
+
     // 验证URL格式
     validateUrl() {
         const { pageUrl } = this.elements;
@@ -514,6 +680,7 @@ class QuickSaveManager {
             const title = pageTitle.textContent.trim();
             const url = this.getEditedUrl();
             const excerpt = this.getEditedExcerpt();
+            const baseBookmark = this.isEditMode ? (this.editingBookmark || {}) : {};
 
             // 验证URL
             try {
@@ -523,9 +690,11 @@ class QuickSaveManager {
             }
             
             const pageInfo = {
+                ...baseBookmark,
                 url: url, 
                 title: title,
                 tags: tags,
+                hierarchicalTags: normalizeHierarchicalTags(tags),
                 excerpt: excerpt,
                 savedAt: this.isEditMode ? this.editingBookmark.savedAt : Date.now(),
                 useCount: this.isEditMode ? this.editingBookmark.useCount : 1,
@@ -723,9 +892,19 @@ class QuickSaveManager {
         return this.elements.pageExcerpt ? this.elements.pageExcerpt.value.trim() : '';
     }
 
-    async generateExcerpt() {
+    async autoGenerateExcerptIfNeeded() {
         const { pageExcerpt, generateExcerptBtn } = this.elements;
         if (!pageExcerpt || !generateExcerptBtn) return;
+        if (pageExcerpt.value.trim()) return;
+        if (generateExcerptBtn.classList.contains('loading')) return;
+
+        await this.generateExcerpt({ silent: true });
+    }
+
+    async generateExcerpt(options = {}) {
+        const { pageExcerpt, generateExcerptBtn } = this.elements;
+        if (!pageExcerpt || !generateExcerptBtn) return;
+        const { silent = false } = options;
         
         // 如果已经在loading状态，尝试取消请求
         if (generateExcerptBtn.classList.contains('loading')) {
@@ -759,7 +938,9 @@ class QuickSaveManager {
                 throw new Error('摘要生成失败');
             }
         } catch (error) {
-            if (error.message.includes('UserCanceled')) {
+            if (silent) {
+                logger.debug('自动生成摘要失败:', error);
+            } else if (error.message.includes('UserCanceled')) {
                 this.showStatus('已取消生成摘要', 'success');
             } else {
                 this.showStatus(`${error.message}`, 'error');
